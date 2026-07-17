@@ -2,9 +2,9 @@
  * HTTP server entrypoint.
  *
  * Builds a Fastify app with security headers, request body size limits, CORS,
- * a safe error handler, and a simple liveness endpoint. Configuration is loaded
- * and validated when `./config/env.js` is imported — if env is invalid the
- * process exits before listen.
+ * a safe error handler, liveness (`/health`), and database readiness (`/ready`).
+ * Configuration is loaded and validated when `./config/env.js` is imported —
+ * if env is invalid the process exits before listen.
  */
 import Fastify, {
   type FastifyInstance,
@@ -13,6 +13,7 @@ import Fastify, {
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import { config } from "./config/env.js";
+import { prisma } from "./db/prisma.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -46,8 +47,19 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.status(status).send({ error: error.message });
   });
 
-  // Liveness probe — does not check the database.
+  // Liveness probe — process is up (does not check the database).
   app.get("/health", async () => ({ status: "ok" }));
+
+  // Readiness probe — verifies Postgres accepts a simple query.
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { status: "ready" };
+    } catch (err) {
+      app.log.warn({ err }, "readiness check failed");
+      return reply.status(503).send({ status: "not_ready" });
+    }
+  });
 
   return app;
 }

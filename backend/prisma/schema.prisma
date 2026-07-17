@@ -1,5 +1,5 @@
-// Prisma schema — datasource and client generator.
-// Application models are defined as the data layer grows.
+// Prisma data model for cases, specialists, timeline events, and idempotent commands.
+// Stage advances append a CaseEvent and update the Case row in one transaction.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,4 +10,119 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum CaseStatus {
+  RECEIVED
+  SCRUBBED
+  CLASSIFIED
+  NEEDS_REVIEW
+  ASSIGNED
+  REASSIGNED
+  UNASSIGNABLE
+  FAILED
+}
+
+enum CaseEventType {
+  RECEIVED
+  SCRUBBED
+  CLASSIFIED
+  NEEDS_REVIEW
+  ASSIGNED
+  REASSIGNED
+  UNASSIGNABLE
+  FAILED
+}
+
+enum Department {
+  CARDIOLOGY
+  NEPHROLOGY
+  ONCOLOGY
+  NEUROLOGY
+  ORTHOPEDICS
+  GENERAL
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EventSource {
+  SYSTEM
+  LLM
+  GUARDRAIL
+  HUMAN
+}
+
+model Specialist {
+  id          String     @id @default(cuid())
+  name        String
+  title       String
+  department  Department
+  expertise   String[]
+  profile     String     @db.Text
+  onPto       Boolean    @default(false) @map("on_pto")
+  maxCapacity Int        @default(3) @map("max_capacity")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  assignedCases Case[]
+
+  @@map("specialists")
+}
+
+model Case {
+  id                   String      @id @default(cuid())
+  scrubbedText         String      @default("") @map("scrubbed_text") @db.Text
+  status               CaseStatus  @default(RECEIVED)
+  category             Department?
+  priority             Priority?
+  requiredExpertise    String[]    @default([]) @map("required_expertise")
+  summary              String?
+  confidence           Float?
+  assignedSpecialistId String?     @map("assigned_specialist_id")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+
+  assignedSpecialist Specialist? @relation(fields: [assignedSpecialistId], references: [id])
+  events             CaseEvent[]
+
+  @@index([assignedSpecialistId])
+  @@index([status])
+  @@map("cases")
+}
+
+model CaseEvent {
+  id          String        @id @default(cuid())
+  caseId      String        @map("case_id")
+  sequence    Int
+  type        CaseEventType
+  summary     String
+  reasoning   String?       @db.Text
+  data        Json          @default("{}")
+  source      EventSource
+  llmMeta     Json?         @map("llm_meta")
+  causationId String?       @map("causation_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, sequence])
+  @@index([caseId])
+  @@map("case_events")
+}
+
+model ProcessedCommand {
+  commandId     String   @id @map("command_id")
+  kind          String
+  resourceType  String   @map("resource_type")
+  resourceId    String   @map("resource_id")
+  resultSummary Json?    @map("result_summary")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([resourceType, resourceId])
+  @@map("processed_commands")
 }
