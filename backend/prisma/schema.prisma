@@ -1,0 +1,13 @@
+// Prisma schema — datasource and client generator.
+// Application models are defined as the data layer grows.
+
+generator client {
+  provider = "prisma-client-js"
+  // Generate into the repo so TypeScript can import models/enums reliably.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

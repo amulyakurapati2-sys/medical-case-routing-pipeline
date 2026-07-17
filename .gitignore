@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Local npm cache (workspace-isolated install)
+**/.npm-cache/
+
+# Environment / secrets (never commit real keys)
+.env
+.env.local
+*.env
+!.env.example
+
+# Prisma generated client
+backend/src/generated/
+**/.prisma/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local workflow / planning 
+aidlc-docs/
+.aidlc-rule-details/
+.aidlc/
+.cursor/
+input_files/

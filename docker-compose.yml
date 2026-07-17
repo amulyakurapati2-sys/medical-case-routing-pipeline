@@ -1,0 +1,25 @@
+# Local PostgreSQL for this project.
+#
+# Data is stored in a Docker named volume (`pgdata`), not a host folder bind-mount.
+# Backend and frontend services can be added to this compose file later.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: casepipeline-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: casepipeline
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d casepipeline"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+    name: casepipeline-pgdata
