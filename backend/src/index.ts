@@ -14,12 +14,17 @@ import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import { config } from "./config/env.js";
 import { prisma } from "./db/prisma.js";
+import { createLlmClient } from "./llm/index.js";
+import { createOrchestrator } from "./pipeline/index.js";
+import { bus } from "./events/bus.js";
+import { casesRoutes } from "./routes/cases.js";
+import { specialistsRoutes } from "./routes/specialists.js";
+import { streamRoutes } from "./routes/stream.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "production" ? "info" : "debug",
-      // Avoid leaking secrets if they ever appear on request objects.
       redact: ["req.headers.authorization", "*.LLM_API_KEY", "*.DATABASE_URL"],
     },
     // Reject oversized JSON bodies (HTTP 413).
@@ -60,6 +65,14 @@ export async function buildApp(): Promise<FastifyInstance> {
       return reply.status(503).send({ status: "not_ready" });
     }
   });
+
+  // Construct the AI seam once and wire the pipeline into the HTTP surface.
+  const llm = createLlmClient(config);
+  const orchestrator = createOrchestrator({ llm });
+
+  await app.register(casesRoutes, { prefix: "/api", orchestrator });
+  await app.register(specialistsRoutes, { prefix: "/api", orchestrator });
+  await app.register(streamRoutes, { prefix: "/api", bus });
 
   return app;
 }

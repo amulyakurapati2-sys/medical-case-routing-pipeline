@@ -57,6 +57,14 @@ export const caseRepository = {
     });
   },
 
+  /** Events for a case with sequence greater than `sequence` — for SSE Last-Event-ID replay. */
+  async getEventsAfter(id: string, sequence: number): Promise<CaseEvent[]> {
+    return prisma.caseEvent.findMany({
+      where: { caseId: id, sequence: { gt: sequence } },
+      orderBy: { sequence: "asc" },
+    });
+  },
+
   async findAll(): Promise<Case[]> {
     return prisma.case.findMany({ orderBy: { createdAt: "desc" } });
   },

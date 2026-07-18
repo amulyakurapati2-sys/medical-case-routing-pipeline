@@ -45,8 +45,8 @@ export const specialistRepository = {
 
   /**
    * Candidates for assignment: matching department, not on PTO, under capacity.
-   * Expertise filtering is left to U5 rules when requiredExpertise is known;
-   * optional `expertiseContains` narrows with Postgres array containment.
+   * Expertise matching can be narrowed with `expertiseContains` when callers
+   * already know required tags; otherwise department + PTO + capacity apply.
    */
   async findEligibleByDepartment(
     department: Department,
