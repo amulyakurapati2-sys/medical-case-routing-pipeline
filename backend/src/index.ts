@@ -12,6 +12,9 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "./config/env.js";
 import { prisma } from "./db/prisma.js";
 import { createLlmClient } from "./llm/index.js";
@@ -73,6 +76,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(casesRoutes, { prefix: "/api", orchestrator });
   await app.register(specialistsRoutes, { prefix: "/api", orchestrator });
   await app.register(streamRoutes, { prefix: "/api", bus });
+
+  // Production uses one public origin for the Vue app, REST API, and SSE stream.
+  // The Render build creates frontend/dist before starting this service.
+  if (config.NODE_ENV === "production") {
+    const here = dirname(fileURLToPath(import.meta.url));
+    await app.register(fastifyStatic, {
+      root: resolve(here, "../../frontend/dist"),
+    });
+  }
 
   return app;
 }

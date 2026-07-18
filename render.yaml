@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: medical-case-routing
+    runtime: node
+    plan: free
+    region: ohio
+    buildCommand: npm ci --prefix backend && npm ci --prefix frontend && npm run build --prefix frontend && npm run build --prefix backend
+    preDeployCommand: npm run prisma:migrate --prefix backend && npm run prisma:seed --prefix backend
+    startCommand: npm start --prefix backend
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medical-case-routing-db
+          property: connectionString
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: LLM_MODEL
+        value: llama-3.3-70b-versatile
+      - key: LLM_JSON_MODE
+        value: "true"
+      - key: LLM_TIMEOUT_MS
+        value: "30000"
+      - key: LLM_MAX_RETRIES
+        value: "2"
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.7"
+      - key: BODY_LIMIT_BYTES
+        value: "1048576"
+
+databases:
+  - name: medical-case-routing-db
+    plan: free
+    region: ohio
+    databaseName: casepipeline
+    user: casepipeline
