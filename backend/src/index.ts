@@ -19,7 +19,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "production" ? "info" : "debug",
-      // Avoid leaking secrets if they ever appear on request objects.
       redact: ["req.headers.authorization", "*.LLM_API_KEY", "*.DATABASE_URL"],
     },
     // Reject oversized JSON bodies (HTTP 413).
