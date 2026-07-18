@@ -43,7 +43,7 @@ const RULES: Rule[] = [
     type: "nameLabel",
     // "Name: John Doe", "Patient: Jane Q. Public".
     pattern:
-      /\b(?:patient name|patient|name)\s*:?\s*[A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){0,3}/g,
+      /\b(?:patient name|patient|name)\s*:?\s*[A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){0,3}/gi,
   },
   {
     type: "address",
