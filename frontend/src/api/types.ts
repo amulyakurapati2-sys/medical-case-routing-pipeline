@@ -131,3 +131,7 @@ export interface PtoRequest {
   commandId: string;
   onPto: boolean;
 }
+
+export interface RetryCaseRequest {
+  commandId: string;
+}

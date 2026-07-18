@@ -29,6 +29,12 @@ async function onOverride(
   await review.override(caseId, category, priority);
   await cases.refresh();
 }
+
+async function onRetry(caseId: string): Promise<void> {
+  await review.retryAssignment(caseId);
+  await cases.refresh();
+  await specialists.refresh();
+}
 </script>
 
 <template>
@@ -78,6 +84,7 @@ async function onOverride(
           :review-submitting="review.submitting.value"
           @approve="onApprove"
           @override="onOverride"
+          @retry="onRetry"
         />
       </Card>
 

@@ -37,6 +37,8 @@ export type StageResult = {
   next: StageDirective;
 };
 
+type AssignmentCommand = NonNullable<AppendEventInput["command"]>;
+
 /** Persist a transition transactionally, then publish the event to the bus. */
 async function appendAndEmit(
   input: AppendEventInput,
@@ -169,6 +171,9 @@ export async function reviewStage(
   const casePatch: AppendEventInput["casePatch"] = { status: CaseStatus.CLASSIFIED };
   if (!command.approve && command.overrideCategory) {
     casePatch.category = command.overrideCategory as unknown as PrismaDepartment;
+    // A human department override replaces classifier-generated expertise from
+    // the old department so stale tags cannot influence candidate ranking.
+    casePatch.requiredExpertise = mapCategoryToExpertise(command.overrideCategory, []);
   }
   if (!command.approve && command.overridePriority) {
     casePatch.priority = command.overridePriority as unknown as PrismaPriority;
@@ -184,6 +189,13 @@ export async function reviewStage(
       type: CaseEventType.CLASSIFIED,
       summary,
       source: EventSource.HUMAN,
+      data: {
+        ...(command.overrideCategory ? { category: command.overrideCategory } : {}),
+        ...(command.overridePriority ? { priority: command.overridePriority } : {}),
+        ...(casePatch.requiredExpertise
+          ? { requiredExpertise: casePatch.requiredExpertise }
+          : {}),
+      } as unknown as Prisma.InputJsonValue,
       casePatch,
       command: {
         commandId: command.commandId,
@@ -201,6 +213,7 @@ async function assignCore(
   llm: LlmClient,
   caseRow: Case,
   mode: "ASSIGN" | "REASSIGN",
+  command?: AssignmentCommand,
 ): Promise<StageResult> {
   if (!caseRow.category) {
     throw new Error("cannot assign a case with no category");
@@ -224,6 +237,7 @@ async function assignCore(
         reasoning: "All matching specialists are on PTO or at capacity",
         source: EventSource.SYSTEM,
         casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
+        command,
       },
       "TERMINAL",
     );
@@ -251,6 +265,7 @@ async function assignCore(
         source: EventSource.SYSTEM,
         llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
         casePatch: { status: assignedStatus, assignedSpecialistId: chosen.id },
+        command,
       },
       "TERMINAL",
     );
@@ -272,14 +287,19 @@ async function assignCore(
       source: EventSource.SYSTEM,
       llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
       casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
+      command,
     },
     "TERMINAL",
   );
 }
 
 /** ASSIGN — first-time routing to a specialist (or UNASSIGNABLE). */
-export async function assignStage(llm: LlmClient, caseRow: Case): Promise<StageResult> {
-  return assignCore(llm, caseRow, "ASSIGN");
+export async function assignStage(
+  llm: LlmClient,
+  caseRow: Case,
+  command?: AssignmentCommand,
+): Promise<StageResult> {
+  return assignCore(llm, caseRow, "ASSIGN", command);
 }
 
 /** REASSIGN — re-route an open case (e.g. after its specialist went on PTO). */

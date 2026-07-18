@@ -10,13 +10,28 @@ export const CreateCaseBody = z.object({
 });
 export type CreateCaseBody = z.infer<typeof CreateCaseBody>;
 
-export const ReviewBody = z.object({
-  commandId: z.string().min(1, "commandId is required"),
-  action: z.nativeEnum(ReviewDecision),
-  overrideCategory: z.nativeEnum(Department).optional(),
-  overridePriority: z.nativeEnum(Priority).optional(),
-});
+export const ReviewBody = z
+  .object({
+    commandId: z.string().min(1, "commandId is required"),
+    action: z.nativeEnum(ReviewDecision),
+    overrideCategory: z.nativeEnum(Department).optional(),
+    overridePriority: z.nativeEnum(Priority).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.action === ReviewDecision.OVERRIDE && !value.overrideCategory) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["overrideCategory"],
+        message: "overrideCategory is required when action is OVERRIDE",
+      });
+    }
+  });
 export type ReviewBody = z.infer<typeof ReviewBody>;
+
+export const RetryCaseBody = z.object({
+  commandId: z.string().min(1, "commandId is required"),
+});
+export type RetryCaseBody = z.infer<typeof RetryCaseBody>;
 
 export const PtoBody = z.object({
   commandId: z.string().min(1, "commandId is required"),

@@ -162,7 +162,15 @@ export function createLlmClient(config: AppConfig): LlmClient {
         system: buildMatchSystemPrompt(),
         user: buildMatchUserPrompt(caseInfo, candidates),
         promptVersion: MATCH_PROMPT_VERSION,
-        parse: (raw) => MatchSchema.parse(raw),
+        parse: (raw) => {
+          const parsed = MatchSchema.parse(raw);
+          if (parsed.decision === "UNASSIGNABLE") {
+            throw new Error(
+              "Model returned UNASSIGNABLE despite receiving eligible candidates",
+            );
+          }
+          return parsed;
+        },
         failureLabel: "Specialist match",
       });
     },

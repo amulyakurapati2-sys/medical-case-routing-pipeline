@@ -6,6 +6,7 @@ import type {
   CaseDetail,
   CaseSummary,
   PtoRequest,
+  RetryCaseRequest,
   ReviewRequest,
   SpecialistVM,
 } from "./types";
@@ -56,6 +57,8 @@ export const api = {
     request<{ id: string }>("POST", "/cases", { text }),
   review: (id: string, body: ReviewRequest) =>
     request<{ accepted: boolean }>("POST", `/cases/${id}/review`, body),
+  retryCase: (id: string, body: RetryCaseRequest) =>
+    request<{ accepted: boolean }>("POST", `/cases/${id}/retry`, body),
   listSpecialists: () => request<SpecialistVM[]>("GET", "/specialists"),
   setPto: (id: string, body: PtoRequest) =>
     request<SpecialistVM>("PATCH", `/specialists/${id}`, body),

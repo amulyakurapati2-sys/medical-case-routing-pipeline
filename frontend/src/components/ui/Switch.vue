@@ -22,7 +22,7 @@ function toggle(): void {
         'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400',
         'disabled:opacity-50',
-        model ? 'bg-slate-900' : 'bg-slate-300',
+        model ? 'bg-emerald-500' : 'bg-slate-300',
       )
     "
     @click="toggle"

@@ -31,6 +31,7 @@ export type Orchestrator = {
   runPipeline(caseId: string, rawText: string): Promise<void>;
   resumeAfterReview(caseId: string, command: ReviewCommand): Promise<void>;
   reassignForSpecialist(specialistId: string): Promise<void>;
+  retryUnassignable(caseId: string, commandId: string): Promise<void>;
 };
 
 /** Produce a client-safe failure reason (no secrets, no raw PHI). */
@@ -109,5 +110,33 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
     }
   }
 
-  return { runPipeline, resumeAfterReview, reassignForSpecialist };
+  async function retryUnassignable(caseId: string, commandId: string): Promise<void> {
+    try {
+      const alreadyProcessed = await commandRepository.findByCommandId(commandId);
+      if (alreadyProcessed) {
+        return;
+      }
+
+      const caseRow = await caseRepository.findById(caseId);
+      if (!caseRow || caseRow.status !== CaseStatus.UNASSIGNABLE) {
+        return;
+      }
+
+      await assignStage(llm, caseRow, {
+        commandId,
+        kind: "RETRY_ASSIGNMENT",
+        resourceType: "case",
+        resourceId: caseId,
+      });
+    } catch (err) {
+      await failStage(caseId, safeReason(err));
+    }
+  }
+
+  return {
+    runPipeline,
+    resumeAfterReview,
+    reassignForSpecialist,
+    retryUnassignable,
+  };
 }

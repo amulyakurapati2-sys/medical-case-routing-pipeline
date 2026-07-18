@@ -3,12 +3,15 @@
  */
 import type { CandidateProfile, CaseInfo } from "./schemas.js";
 
-export const MATCH_PROMPT_VERSION = "match-v1";
+export const MATCH_PROMPT_VERSION = "match-v2";
 
 export function buildMatchSystemPrompt(): string {
   return [
     "You are a specialist-matching assistant for a SYNTHETIC medical routing demo.",
+    "The supplied candidates already passed deterministic department, PTO, expertise, and capacity rules.",
     "Rank ONLY among the supplied candidates. Do not invent ids.",
+    'When one or more candidates are supplied, you MUST return decision "ASSIGN" and choose the best available candidate.',
+    'Use "UNASSIGNABLE" only when the candidate list is empty.',
     "Respond with a single JSON object only — no markdown, no prose.",
     "Required keys:",
     '- decision: "ASSIGN" or "UNASSIGNABLE"',

@@ -40,5 +40,17 @@ export function useReview() {
     }
   }
 
-  return { submitting, error, approve, override };
+  async function retryAssignment(caseId: string): Promise<void> {
+    submitting.value = true;
+    error.value = null;
+    try {
+      await api.retryCase(caseId, { commandId: newCommandId() });
+    } catch (err) {
+      error.value = err instanceof ApiError ? err.message : "Retry failed";
+    } finally {
+      submitting.value = false;
+    }
+  }
+
+  return { submitting, error, approve, override, retryAssignment };
 }

@@ -52,10 +52,10 @@ const emit = defineEmits<{ "toggle-pto": [id: string, onPto: boolean] }>();
             <label class="flex items-center gap-2 text-xs text-slate-600">
               <span>{{ s.onPto ? "On PTO" : "Available" }}</span>
               <Switch
-                :model-value="s.onPto"
+                :model-value="!s.onPto"
                 :disabled="pendingId === s.id"
                 :testid="`specialist-pto-toggle-${s.id}`"
-                @update:model-value="(v) => emit('toggle-pto', s.id, v)"
+                @update:model-value="(available) => emit('toggle-pto', s.id, !available)"
               />
             </label>
           </div>

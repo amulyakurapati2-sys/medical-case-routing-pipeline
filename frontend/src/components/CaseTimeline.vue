@@ -4,6 +4,7 @@ import Badge from "./ui/Badge.vue";
 import ScrollArea from "./ui/ScrollArea.vue";
 import TimelineStage from "./TimelineStage.vue";
 import ReviewPanel from "./ReviewPanel.vue";
+import Button from "./ui/Button.vue";
 import type { CaseDetail, CaseEventVM, Department, Priority, SpecialistVM } from "@/api/types";
 import { statusClasses } from "@/lib/badges";
 import { shortId } from "@/lib/utils";
@@ -18,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   approve: [caseId: string];
   override: [caseId: string, category: Department, priority?: Priority];
+  retry: [caseId: string];
 }>();
 
 const assignedName = computed(() => {
@@ -65,6 +67,25 @@ const assignedName = computed(() => {
         @approve="(id) => emit('approve', id)"
         @override="(id, cat, pri) => emit('override', id, cat, pri)"
       />
+
+      <div
+        v-if="detail.status === 'UNASSIGNABLE'"
+        class="mb-3 rounded-md border border-orange-300 bg-orange-50 p-3"
+        data-testid="unassignable-retry-panel"
+      >
+        <p class="text-sm font-medium text-orange-900">No specialist is currently assigned</p>
+        <p class="mt-0.5 text-xs text-orange-700">
+          Retry after specialist availability or capacity changes.
+        </p>
+        <Button
+          class="mt-2"
+          :disabled="reviewSubmitting"
+          data-testid="case-retry-button"
+          @click="emit('retry', detail.id)"
+        >
+          {{ reviewSubmitting ? "Retrying…" : "Retry assignment" }}
+        </Button>
+      </div>
 
       <ScrollArea class="min-h-0 flex-1 pr-1">
         <div class="flex flex-col gap-3 py-1">

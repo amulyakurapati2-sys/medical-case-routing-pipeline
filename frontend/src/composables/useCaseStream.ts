@@ -43,8 +43,11 @@ export function useCaseStream(selectedId: Ref<string | null>) {
     if (event.data.priority) detail.value.priority = event.data.priority;
     if (typeof event.data.confidence === "number")
       detail.value.confidence = event.data.confidence;
-    if (event.data.specialistId)
+    if (event.type === "UNASSIGNABLE" || event.type === "FAILED") {
+      detail.value.assignedSpecialistId = null;
+    } else if (event.data.specialistId) {
       detail.value.assignedSpecialistId = event.data.specialistId;
+    }
   }
 
   async function loadSnapshot(id: string): Promise<void> {
