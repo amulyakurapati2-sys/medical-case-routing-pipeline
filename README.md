@@ -79,6 +79,17 @@ Expected health responses:
 {"status":"ready"}
 ```
 
+### Run the tests
+
+The focused backend suite covers sensitive-data scrubbing, structured LLM
+responses, deterministic routing and grounding, request validation, and public
+demo rate limits. It does not require a database or provider API key.
+
+```bash
+npm test --prefix backend
+npm run typecheck --prefix backend
+```
+
 ### Stop or reset
 
 ```bash
