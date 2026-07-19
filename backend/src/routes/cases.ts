@@ -4,6 +4,7 @@ import { caseRepository } from "../db/repositories/caseRepository.js";
 import { commandRepository } from "../db/repositories/commandRepository.js";
 import {
   assertCommandMatches,
+  retryCommandRecord,
   reviewCommandRecord,
 } from "../db/repositories/idempotency.js";
 import type { Orchestrator } from "../pipeline/index.js";
@@ -99,6 +100,16 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = parseBody(RetryCaseBody, req.body);
+      const commandRecord = retryCommandRecord(id);
+
+      // As with review, idempotency takes precedence over current state. A
+      // successfully accepted retry remains replayable after assignment.
+      const existingCommand = await commandRepository.findByCommandId(body.commandId);
+      if (existingCommand) {
+        assertCommandMatches(existingCommand, commandRecord);
+        return reply.code(202).send({ accepted: true });
+      }
+
       const found = await caseRepository.findById(id);
 
       if (!found) {
@@ -114,7 +125,9 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
         });
       }
 
-      void orchestrator.retryUnassignable(id, body.commandId);
+      // Await only the atomic retry acceptance. Assignment resumes
+      // asynchronously after the command and state transition commit.
+      await orchestrator.retryUnassignable(id, body.commandId);
       return reply.code(202).send({ accepted: true });
     },
   );

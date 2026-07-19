@@ -48,7 +48,10 @@ export const specialistsRoutes: FastifyPluginAsync<SpecialistsDeps> = async (
         void orchestrator.reassignForSpecialist(id);
       }
 
-      return result.specialist;
+      return {
+        ...result.specialist,
+        currentLoad: await specialistRepository.getDerivedLoad(id),
+      };
     },
   );
 };

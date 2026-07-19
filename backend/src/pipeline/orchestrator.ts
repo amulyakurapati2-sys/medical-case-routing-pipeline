@@ -8,7 +8,7 @@ import { caseRepository } from "../db/repositories/caseRepository.js";
 import { commandRepository } from "../db/repositories/commandRepository.js";
 import {
   assertCommandMatches,
-  IdempotencyConflictError,
+  retryCommandRecord,
   reviewCommandRecord,
 } from "../db/repositories/idempotency.js";
 import type { LlmClient } from "../llm/index.js";
@@ -18,6 +18,7 @@ import {
   classifyStage,
   failStage,
   reassignStageForCase,
+  retryStage,
   reviewStage,
   scrubStage,
 } from "./stages.js";
@@ -42,6 +43,26 @@ function safeReason(err: unknown): string {
     return err.message;
   }
   return "Internal pipeline error";
+}
+
+/** Resolve a concurrent global commandId reservation as replay or conflict. */
+async function resolveCommandReservationRace(
+  error: unknown,
+  commandId: string,
+  expected: Parameters<typeof assertCommandMatches>[1],
+): Promise<void> {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== "P2002"
+  ) {
+    throw error;
+  }
+
+  const existing = await commandRepository.findByCommandId(commandId);
+  if (!existing) {
+    throw error;
+  }
+  assertCommandMatches(existing, expected);
 }
 
 export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
@@ -84,17 +105,11 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
       // Two requests for different cases can race to reserve the same global
       // commandId without sharing a case-row lock. Resolve the unique-key loser
       // as an idempotent replay or a 409 conflict.
-      if (
-        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-        error.code !== "P2002"
-      ) {
-        throw error;
-      }
-      const existing = await commandRepository.findByCommandId(command.commandId);
-      if (!existing) {
-        throw error;
-      }
-      assertCommandMatches(existing, reviewCommandRecord(caseId, command));
+      await resolveCommandReservationRace(
+        error,
+        command.commandId,
+        reviewCommandRecord(caseId, command),
+      );
       return;
     }
 
@@ -127,32 +142,32 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
   }
 
   async function retryUnassignable(caseId: string, commandId: string): Promise<void> {
+    let retried: Awaited<ReturnType<typeof retryStage>>;
     try {
-      const commandRecord = {
-        kind: "RETRY_ASSIGNMENT",
-        resourceType: "case",
-        resourceId: caseId,
-      };
-      const alreadyProcessed = await commandRepository.findByCommandId(commandId);
-      if (alreadyProcessed) {
-        assertCommandMatches(alreadyProcessed, commandRecord);
-        return;
-      }
-
-      const caseRow = await caseRepository.findById(caseId);
-      if (!caseRow || caseRow.status !== CaseStatus.UNASSIGNABLE) {
-        return;
-      }
-
-      await assignStage(llm, caseRow, {
+      retried = await retryStage(caseId, commandId);
+    } catch (error) {
+      // Resolve a race to reserve a commandId exactly as the review flow does:
+      // identical delivery is a replay; different usage is a synchronous 409.
+      await resolveCommandReservationRace(
+        error,
         commandId,
-        ...commandRecord,
-      });
+        retryCommandRecord(caseId),
+      );
+      return;
+    }
+
+    if (retried.replayed) {
+      return;
+    }
+
+    void assignRetriedCase(retried.case);
+  }
+
+  async function assignRetriedCase(caseRow: Case): Promise<void> {
+    try {
+      await assignStage(llm, caseRow, CaseStatus.CLASSIFIED);
     } catch (err) {
-      if (err instanceof IdempotencyConflictError) {
-        return;
-      }
-      await failStage(caseId, safeReason(err));
+      await failStage(caseRow.id, safeReason(err), CaseStatus.CLASSIFIED);
     }
   }
 

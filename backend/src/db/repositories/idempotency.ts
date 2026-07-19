@@ -38,6 +38,18 @@ export function reviewCommandRecord(
   };
 }
 
+export function retryCommandRecord(caseId: string): {
+  kind: string;
+  resourceType: string;
+  resourceId: string;
+} {
+  return {
+    kind: "RETRY_ASSIGNMENT",
+    resourceType: "case",
+    resourceId: caseId,
+  };
+}
+
 export function assertCommandMatches(
   command: Pick<
     ProcessedCommand,

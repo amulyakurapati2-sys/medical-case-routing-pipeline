@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertCommandMatches,
   IdempotencyConflictError,
+  retryCommandRecord,
   reviewCommandRecord,
 } from "../src/db/repositories/idempotency.js";
 
@@ -29,6 +30,14 @@ test("review command identity includes the decision payload", () => {
     }),
     command,
   );
+});
+
+test("retry command identity is scoped to its case", () => {
+  assert.deepEqual(retryCommandRecord("case-1"), {
+    kind: "RETRY_ASSIGNMENT",
+    resourceType: "case",
+    resourceId: "case-1",
+  });
 });
 
 test("a command ID cannot be reused for another case", () => {

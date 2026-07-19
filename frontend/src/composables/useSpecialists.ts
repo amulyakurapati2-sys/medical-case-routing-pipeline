@@ -20,6 +20,7 @@ export function useSpecialists() {
   async function refresh(): Promise<void> {
     try {
       specialists.value = await api.listSpecialists();
+      error.value = null;
     } catch (err) {
       error.value =
         err instanceof ApiError ? err.message : "Failed to load specialists";

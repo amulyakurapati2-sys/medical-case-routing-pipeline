@@ -100,6 +100,7 @@ async function onRetry(caseId: string): Promise<void> {
           :detail="stream.detail.value"
           :events="stream.events.value"
           :connected="stream.connected.value"
+          :load-error="stream.error.value"
           :specialists-by-id="specialists.byId.value"
           :review-submitting="review.submitting.value"
           :action-error="review.error.value"

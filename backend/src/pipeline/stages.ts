@@ -12,7 +12,10 @@ import {
 } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { AssignmentEligibilityError } from "../db/repositories/assignmentEligibility.js";
-import { reviewCommandRecord } from "../db/repositories/idempotency.js";
+import {
+  retryCommandRecord,
+  reviewCommandRecord,
+} from "../db/repositories/idempotency.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
 import type { AppendEventInput } from "../db/repositories/types.js";
 import type { LlmClient } from "../llm/index.js";
@@ -34,8 +37,6 @@ export type StageResult = {
   next: StageDirective;
   replayed: boolean;
 };
-
-type AssignmentCommand = NonNullable<AppendEventInput["command"]>;
 
 /** Persist a transition transactionally, then publish the event to the bus. */
 async function appendAndEmit(
@@ -212,12 +213,37 @@ export async function reviewStage(
   );
 }
 
+/**
+ * RETRY — atomically accept an idempotent retry command and move an
+ * unassignable case back to CLASSIFIED before asynchronous assignment resumes.
+ */
+export async function retryStage(
+  caseId: string,
+  commandId: string,
+): Promise<StageResult> {
+  return appendAndEmit(
+    {
+      caseId,
+      type: CaseEventType.CLASSIFIED,
+      summary: "Assignment retry requested",
+      source: EventSource.HUMAN,
+      casePatch: { status: CaseStatus.CLASSIFIED },
+      expectedCaseStatus: CaseStatus.UNASSIGNABLE,
+      command: {
+        commandId,
+        ...retryCommandRecord(caseId),
+      },
+    },
+    "CONTINUE",
+  );
+}
+
 /** Shared assign/reassign core: filter → match → ground → veto → decide. */
 async function assignCore(
   llm: LlmClient,
   caseRow: Case,
   mode: "ASSIGN" | "REASSIGN",
-  command?: AssignmentCommand,
+  expectedCaseStatus?: CaseStatus,
 ): Promise<StageResult> {
   if (!caseRow.category) {
     throw new Error("cannot assign a case with no category");
@@ -241,7 +267,7 @@ async function assignCore(
         reasoning: "All matching specialists are on PTO or at capacity",
         source: EventSource.SYSTEM,
         casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
-        command,
+        expectedCaseStatus,
       },
       "TERMINAL",
     );
@@ -274,7 +300,7 @@ async function assignCore(
             specialistId: chosen.id,
             department: caseRow.category,
           },
-          command,
+          expectedCaseStatus,
         },
         "TERMINAL",
       );
@@ -292,7 +318,7 @@ async function assignCore(
           source: EventSource.GUARDRAIL,
           llmMeta: { ...llmMeta },
           casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
-          command,
+          expectedCaseStatus,
         },
         "TERMINAL",
       );
@@ -315,7 +341,7 @@ async function assignCore(
       source: EventSource.SYSTEM,
       llmMeta: { ...llmMeta },
       casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
-      command,
+      expectedCaseStatus,
     },
     "TERMINAL",
   );
@@ -325,9 +351,9 @@ async function assignCore(
 export async function assignStage(
   llm: LlmClient,
   caseRow: Case,
-  command?: AssignmentCommand,
+  expectedCaseStatus?: CaseStatus,
 ): Promise<StageResult> {
-  return assignCore(llm, caseRow, "ASSIGN", command);
+  return assignCore(llm, caseRow, "ASSIGN", expectedCaseStatus);
 }
 
 /** REASSIGN — re-route an open case (e.g. after its specialist went on PTO). */
@@ -339,7 +365,11 @@ export async function reassignStageForCase(
 }
 
 /** FAIL — terminal error state; never silent, safe reason only. */
-export async function failStage(caseId: string, reason: string): Promise<StageResult> {
+export async function failStage(
+  caseId: string,
+  reason: string,
+  expectedCaseStatus?: CaseStatus,
+): Promise<StageResult> {
   return appendAndEmit(
     {
       caseId,
@@ -348,6 +378,7 @@ export async function failStage(caseId: string, reason: string): Promise<StageRe
       reasoning: reason,
       source: EventSource.SYSTEM,
       casePatch: { status: CaseStatus.FAILED },
+      expectedCaseStatus,
     },
     "TERMINAL",
   );

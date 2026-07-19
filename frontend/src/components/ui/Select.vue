@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 const model = defineModel<T | "">();
 defineProps<{
+  id?: string;
   options: readonly T[];
   placeholder?: string;
   disabled?: boolean;
@@ -13,6 +14,7 @@ defineProps<{
 
 <template>
   <select
+    :id="id"
     v-model="model"
     :disabled="disabled"
     :data-testid="testid"
