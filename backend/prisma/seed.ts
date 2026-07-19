@@ -116,13 +116,13 @@ async function main(): Promise<void> {
     await prisma.specialist.upsert({
       where: { id: s.id },
       create: s,
+      // Keep mutable runtime availability; only fresh rows receive seed PTO defaults.
       update: {
         name: s.name,
         title: s.title,
         department: s.department,
         expertise: s.expertise,
         profile: s.profile,
-        onPto: s.onPto,
         maxCapacity: s.maxCapacity,
       },
     });
