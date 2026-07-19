@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertCommandMatches,
   IdempotencyConflictError,
+  reviewCommandRecord,
 } from "../src/db/repositories/idempotency.js";
 
 const command = {
@@ -18,6 +19,16 @@ const command = {
 
 test("an identical case command is accepted as a replay", () => {
   assert.doesNotThrow(() => assertCommandMatches(command, command));
+});
+
+test("review command identity includes the decision payload", () => {
+  assert.deepEqual(
+    reviewCommandRecord("case-1", {
+      approve: false,
+      overrideCategory: "CARDIOLOGY",
+    }),
+    command,
+  );
 });
 
 test("a command ID cannot be reused for another case", () => {

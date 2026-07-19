@@ -1,6 +1,11 @@
 /** Case submission, inspection, review, and retry routes. */
 import type { FastifyPluginAsync } from "fastify";
 import { caseRepository } from "../db/repositories/caseRepository.js";
+import { commandRepository } from "../db/repositories/commandRepository.js";
+import {
+  assertCommandMatches,
+  reviewCommandRecord,
+} from "../db/repositories/idempotency.js";
 import type { Orchestrator } from "../pipeline/index.js";
 import {
   CreateCaseBody,
@@ -48,12 +53,40 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = parseBody(ReviewBody, req.body);
-      void orchestrator.resumeAfterReview(id, {
+      const command = {
         commandId: body.commandId,
         approve: body.action === "APPROVE",
         overrideCategory: body.overrideCategory,
         overridePriority: body.overridePriority,
-      });
+      };
+      const commandRecord = reviewCommandRecord(id, command);
+
+      // Idempotency takes precedence over current state: an identical command
+      // remains successful after its first execution moved the case forward.
+      const existingCommand = await commandRepository.findByCommandId(body.commandId);
+      if (existingCommand) {
+        assertCommandMatches(existingCommand, commandRecord);
+        return reply.code(202).send({ accepted: true });
+      }
+
+      const found = await caseRepository.findById(id);
+
+      if (!found) {
+        return reply
+          .code(404)
+          .send({ error: "Not Found", message: `Case ${id} not found`, status: 404 });
+      }
+      if (found.status !== "NEEDS_REVIEW") {
+        return reply.code(409).send({
+          error: "Conflict",
+          message: `Case ${id} is not awaiting review`,
+          status: 409,
+        });
+      }
+
+      // Await only the transactional review acceptance. The orchestrator starts
+      // assignment asynchronously after the command and state change commit.
+      await orchestrator.resumeAfterReview(id, command);
       return reply.code(202).send({ accepted: true });
     },
   );

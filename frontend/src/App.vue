@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { toRef } from "vue";
+import { toRef, watch } from "vue";
 import CaseSubmitForm from "./components/CaseSubmitForm.vue";
 import CaseList from "./components/CaseList.vue";
 import CaseTimeline from "./components/CaseTimeline.vue";
@@ -15,6 +15,27 @@ const cases = useCases();
 const specialists = useSpecialists();
 const stream = useCaseStream(toRef(cases, "selectedId"));
 const review = useReview();
+
+// Assignment work continues after the API accepts review, retry, or PTO
+// commands. Refresh derived specialist loads when the committed terminal event
+// arrives instead of reading them too early from the initial HTTP response.
+watch(
+  () => {
+    const latest = stream.events.value.at(-1);
+    return latest
+      ? `${cases.selectedId.value}:${latest.sequence}:${latest.type}`
+      : null;
+  },
+  () => {
+    const latest = stream.events.value.at(-1);
+    if (
+      latest &&
+      ["ASSIGNED", "REASSIGNED", "UNASSIGNABLE"].includes(latest.type)
+    ) {
+      void specialists.refresh();
+    }
+  },
+);
 
 async function onApprove(caseId: string): Promise<void> {
   await review.approve(caseId);
@@ -33,7 +54,6 @@ async function onOverride(
 async function onRetry(caseId: string): Promise<void> {
   await review.retryAssignment(caseId);
   await cases.refresh();
-  await specialists.refresh();
 }
 </script>
 

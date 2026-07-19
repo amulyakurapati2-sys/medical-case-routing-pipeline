@@ -90,6 +90,20 @@ npm test --prefix backend
 npm run typecheck --prefix backend
 ```
 
+The optional PostgreSQL integration suite verifies concurrent human-review
+commands against real row locks. Point it only at an isolated schema whose name
+starts with `test_`:
+
+```bash
+docker compose up -d postgres
+export TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/casepipeline?schema=test_integration'
+DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:migrate --prefix backend
+npm run test:integration --prefix backend
+```
+
+The integration tests delete only the cases and commands they create. They
+refuse to run against the normal `public` schema.
+
 ### Stop or reset
 
 ```bash

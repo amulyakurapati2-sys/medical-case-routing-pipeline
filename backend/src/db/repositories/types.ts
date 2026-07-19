@@ -33,6 +33,8 @@ export type AppendEventInput = {
   llmMeta?: Prisma.InputJsonValue | null;
   causationId?: string | null;
   casePatch: CasePatch;
+  /** Required current state, checked while holding the case row lock. */
+  expectedCaseStatus?: CaseStatus;
   /** Rechecked under a specialist row lock before an assignment is committed. */
   assignmentGuard?: {
     specialistId: string;

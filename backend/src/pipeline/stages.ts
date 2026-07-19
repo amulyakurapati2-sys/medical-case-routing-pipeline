@@ -12,6 +12,7 @@ import {
 } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { AssignmentEligibilityError } from "../db/repositories/assignmentEligibility.js";
+import { reviewCommandRecord } from "../db/repositories/idempotency.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
 import type { AppendEventInput } from "../db/repositories/types.js";
 import type { LlmClient } from "../llm/index.js";
@@ -201,16 +202,10 @@ export async function reviewStage(
           : {}),
       },
       casePatch,
+      expectedCaseStatus: CaseStatus.NEEDS_REVIEW,
       command: {
         commandId: command.commandId,
-        kind: "REVIEW",
-        resourceType: "case",
-        resourceId: caseId,
-        resultSummary: {
-          approve: command.approve,
-          overrideCategory: command.overrideCategory ?? null,
-          overridePriority: command.overridePriority ?? null,
-        },
+        ...reviewCommandRecord(caseId, command),
       },
     },
     "CONTINUE",

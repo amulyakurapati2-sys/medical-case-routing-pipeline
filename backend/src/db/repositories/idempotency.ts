@@ -13,6 +13,31 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+export function reviewCommandRecord(
+  caseId: string,
+  command: {
+    approve: boolean;
+    overrideCategory?: string;
+    overridePriority?: string;
+  },
+): {
+  kind: string;
+  resourceType: string;
+  resourceId: string;
+  resultSummary: Prisma.InputJsonObject;
+} {
+  return {
+    kind: "REVIEW",
+    resourceType: "case",
+    resourceId: caseId,
+    resultSummary: {
+      approve: command.approve,
+      overrideCategory: command.overrideCategory ?? null,
+      overridePriority: command.overridePriority ?? null,
+    },
+  };
+}
+
 export function assertCommandMatches(
   command: Pick<
     ProcessedCommand,

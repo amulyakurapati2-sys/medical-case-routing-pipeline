@@ -3,12 +3,13 @@
  * work after PTO changes. Failures become inspectable terminal events.
  */
 import type { Case, Department, Priority } from "../generated/prisma/index.js";
-import { CaseStatus } from "../generated/prisma/index.js";
+import { CaseStatus, Prisma } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { commandRepository } from "../db/repositories/commandRepository.js";
 import {
   assertCommandMatches,
   IdempotencyConflictError,
+  reviewCommandRecord,
 } from "../db/repositories/idempotency.js";
 import type { LlmClient } from "../llm/index.js";
 import { LlmError } from "../llm/index.js";
@@ -71,50 +72,46 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
     caseId: string,
     command: ReviewCommand,
   ): Promise<void> {
+    let reviewed: Awaited<ReturnType<typeof reviewStage>>;
     try {
-      const commandRecord = {
-        kind: "REVIEW",
-        resourceType: "case",
-        resourceId: caseId,
-        resultSummary: {
-          approve: command.approve,
-          overrideCategory: command.overrideCategory ?? null,
-          overridePriority: command.overridePriority ?? null,
-        },
-      };
-      // Idempotency: a replayed review command must not assign twice.
-      const alreadyProcessed = await commandRepository.findByCommandId(command.commandId);
-      if (alreadyProcessed) {
-        assertCommandMatches(alreadyProcessed, commandRecord);
-        return;
-      }
-
-      const caseRow = await caseRepository.findById(caseId);
-      if (!caseRow) {
-        throw new Error(`case ${caseId} not found`);
-      }
-      if (caseRow.status !== CaseStatus.NEEDS_REVIEW) {
-        // Nothing to resume (already handled or not awaiting review).
-        return;
-      }
-
-      const reviewed = await reviewStage(caseId, {
+      reviewed = await reviewStage(caseId, {
         commandId: command.commandId,
         approve: command.approve,
         overrideCategory: command.overrideCategory,
         overridePriority: command.overridePriority,
       });
-
-      if (reviewed.replayed) {
-        return;
+    } catch (error) {
+      // Two requests for different cases can race to reserve the same global
+      // commandId without sharing a case-row lock. Resolve the unique-key loser
+      // as an idempotent replay or a 409 conflict.
+      if (
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== "P2002"
+      ) {
+        throw error;
       }
+      const existing = await commandRepository.findByCommandId(command.commandId);
+      if (!existing) {
+        throw error;
+      }
+      assertCommandMatches(existing, reviewCommandRecord(caseId, command));
+      return;
+    }
 
-      await assignStage(llm, reviewed.case);
+    if (reviewed.replayed) {
+      return;
+    }
+
+    // The review command and state transition have committed. Continue the
+    // potentially slow LLM-backed assignment without delaying the 202 response.
+    void assignReviewedCase(reviewed.case);
+  }
+
+  async function assignReviewedCase(caseRow: Case): Promise<void> {
+    try {
+      await assignStage(llm, caseRow);
     } catch (err) {
-      if (err instanceof IdempotencyConflictError) {
-        return;
-      }
-      await failStage(caseId, safeReason(err));
+      await failStage(caseRow.id, safeReason(err));
     }
   }
 

@@ -19,6 +19,24 @@ import type {
   CreateCaseInput,
 } from "./types.js";
 
+export class CaseNotFoundError extends Error {
+  readonly statusCode = 404;
+
+  constructor(caseId: string) {
+    super(`Case ${caseId} not found`);
+    this.name = "CaseNotFoundError";
+  }
+}
+
+export class CaseStateConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor(caseId: string, expected: CaseStatus) {
+    super(`Case ${caseId} is not in ${expected}`);
+    this.name = "CaseStateConflictError";
+  }
+}
+
 export const caseRepository = {
   /**
    * Create a case in RECEIVED and append the first timeline event in one
@@ -95,11 +113,11 @@ export const caseRepository = {
     return prisma.$transaction(async (tx) => {
       // Serialize all transitions for this case. Without the row lock, two
       // transactions can both calculate the same MAX(sequence) + 1.
-      const locked = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "cases" WHERE "id" = ${input.caseId} FOR UPDATE
+      const locked = await tx.$queryRaw<Array<{ id: string; status: CaseStatus }>>`
+        SELECT "id", "status" FROM "cases" WHERE "id" = ${input.caseId} FOR UPDATE
       `;
       if (locked.length === 0) {
-        throw new Error(`case ${input.caseId} not found`);
+        throw new CaseNotFoundError(input.caseId);
       }
 
       if (input.command) {
@@ -134,6 +152,13 @@ export const caseRepository = {
             resultSummary: input.command.resultSummary ?? undefined,
           },
         });
+      }
+
+      if (
+        input.expectedCaseStatus !== undefined &&
+        locked[0]?.status !== input.expectedCaseStatus
+      ) {
+        throw new CaseStateConflictError(input.caseId, input.expectedCaseStatus);
       }
 
       if (input.assignmentGuard) {
