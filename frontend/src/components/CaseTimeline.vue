@@ -15,6 +15,7 @@ const props = defineProps<{
   connected: boolean;
   specialistsById: Map<string, SpecialistVM>;
   reviewSubmitting: boolean;
+  actionError: string | null;
 }>();
 const emit = defineEmits<{
   approve: [caseId: string];
@@ -67,6 +68,15 @@ const assignedName = computed(() => {
         @approve="(id) => emit('approve', id)"
         @override="(id, cat, pri) => emit('override', id, cat, pri)"
       />
+
+      <p
+        v-if="actionError"
+        class="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+        role="alert"
+        data-testid="case-action-error"
+      >
+        {{ actionError }}
+      </p>
 
       <div
         v-if="detail.status === 'UNASSIGNABLE'"

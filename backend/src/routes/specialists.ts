@@ -1,6 +1,4 @@
-/**
- * U6 — Specialist routes: list (with derived load) and PTO toggle (triggers reassignment).
- */
+/** Specialist listing and availability updates. */
 import type { FastifyPluginAsync } from "fastify";
 import { commandRepository } from "../db/repositories/commandRepository.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
@@ -15,7 +13,6 @@ export const specialistsRoutes: FastifyPluginAsync<SpecialistsDeps> = async (
 ) => {
   const { orchestrator } = opts;
 
-  // FR-7.3 — list with derived current load.
   app.get("/specialists", async () => {
     const list = await specialistRepository.findAll();
     return Promise.all(
@@ -26,36 +23,41 @@ export const specialistsRoutes: FastifyPluginAsync<SpecialistsDeps> = async (
     );
   });
 
-  // FR-6 — PTO toggle; idempotent via commandId; triggers reassignment when going on PTO.
-  app.patch("/specialists/:id", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const body = parseBody(PtoBody, req.body);
+  app.patch(
+    "/specialists/:id",
+    { config: { rateLimit: { max: 20, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = parseBody(PtoBody, req.body);
 
-    const existing = await specialistRepository.findById(id);
-    if (!existing) {
-      return reply
-        .code(404)
-        .send({ error: "Not Found", message: `Specialist ${id} not found`, status: 404 });
-    }
+      const existing = await specialistRepository.findById(id);
+      if (!existing) {
+        return reply.code(404).send({
+          error: "Not Found",
+          message: `Specialist ${id} not found`,
+          status: 404,
+        });
+      }
 
-    // Idempotency: a replayed command returns current state without re-triggering.
-    const alreadyProcessed = await commandRepository.findByCommandId(body.commandId);
-    if (alreadyProcessed) {
-      return specialistRepository.findById(id);
-    }
+      // Idempotency: a replayed command returns current state without re-triggering.
+      const alreadyProcessed = await commandRepository.findByCommandId(body.commandId);
+      if (alreadyProcessed) {
+        return specialistRepository.findById(id);
+      }
 
-    const updated = await specialistRepository.updateAvailability(id, body.onPto);
-    await commandRepository.record({
-      commandId: body.commandId,
-      kind: "PTO",
-      resourceType: "specialist",
-      resourceId: id,
-    });
+      const updated = await specialistRepository.updateAvailability(id, body.onPto);
+      await commandRepository.record({
+        commandId: body.commandId,
+        kind: "PTO",
+        resourceType: "specialist",
+        resourceId: id,
+      });
 
-    if (body.onPto) {
-      void orchestrator.reassignForSpecialist(id);
-    }
+      if (body.onPto) {
+        void orchestrator.reassignForSpecialist(id);
+      }
 
-    return updated;
-  });
+      return updated;
+    },
+  );
 };

@@ -1,11 +1,5 @@
-/**
- * U4 — Grounder (GRN-*). Verifies the model's choices against reality:
- *   - classification category is a real Department
- *   - a chosen specialist id actually exists among the supplied candidates
- *
- * Grounding failure is a retryable signal to U5 (the model hallucinated). Pure (GRD-2).
- */
-import { Department } from "../types.js";
+/** Verify model choices against known departments and supplied candidates. */
+import { Department } from "../generated/prisma/index.js";
 import type { MatchResult } from "../llm/schemas.js";
 
 export type GroundingResult = {

@@ -13,6 +13,7 @@ import Fastify, {
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
+import rateLimit from "@fastify/rate-limit";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./config/env.js";
@@ -32,6 +33,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     // Reject oversized JSON bodies (HTTP 413).
     bodyLimit: config.BODY_LIMIT_BYTES,
+    // Render forwards the original client address. Trust it in production so
+    // per-IP abuse controls do not group every visitor under the proxy address.
+    trustProxy: config.NODE_ENV === "production" ? 1 : false,
   });
 
   // Standard security response headers.
@@ -41,6 +45,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: config.CORS_ORIGIN,
     methods: ["GET", "POST", "PATCH"],
+  });
+
+  // Public demo routes opt into limits individually. Read-only endpoints and
+  // long-lived SSE connections remain unrestricted by this in-memory limiter.
+  await app.register(rateLimit, {
+    global: false,
+    hook: "preHandler",
   });
 
   // Clients get generic messages; full error detail stays in server logs.

@@ -1,6 +1,4 @@
-/**
- * U3 — Specialist match prompts (promptVersion: match-v1).
- */
+/** Versioned prompts for ranking eligible specialists. */
 import type { CandidateProfile, CaseInfo } from "./schemas.js";
 
 export const MATCH_PROMPT_VERSION = "match-v2";

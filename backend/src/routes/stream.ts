@@ -1,7 +1,4 @@
-/**
- * U6 — Per-case SSE stream with recovery (FR-7.4). On connect we replay missed/all events, then
- * subscribe to the in-process bus for live updates, send heartbeats, and clean up on disconnect.
- */
+/** Per-case SSE stream with persisted-event replay and heartbeat cleanup. */
 import type { FastifyPluginAsync } from "fastify";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import type { CaseEventBus } from "../events/bus.js";

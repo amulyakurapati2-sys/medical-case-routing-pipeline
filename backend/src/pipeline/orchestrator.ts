@@ -1,16 +1,13 @@
 /**
- * U5 — Orchestrator. Sequences stages in-process (fire-and-forget, Q2=A), resumes after human
- * review, and reassigns a specialist's open cases after PTO. Any thrown error is caught and turned
- * into a terminal FAILED state (never silent). The LlmClient is injected so U6 can wire it and
- * later tests can mock it at the adapter boundary.
+ * Sequences pipeline stages in process, resumes reviewed cases, and reassigns
+ * work after PTO changes. Failures become inspectable terminal events.
  */
-import type { Case } from "../generated/prisma/index.js";
+import type { Case, Department, Priority } from "../generated/prisma/index.js";
 import { CaseStatus } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { commandRepository } from "../db/repositories/commandRepository.js";
 import type { LlmClient } from "../llm/index.js";
 import { LlmError } from "../llm/index.js";
-import type { Department, Priority, ReviewDecision } from "../types.js";
 import {
   assignStage,
   classifyStage,
@@ -22,7 +19,7 @@ import {
 
 export type ReviewCommand = {
   commandId: string;
-  action: ReviewDecision;
+  approve: boolean;
   overrideCategory?: Department;
   overridePriority?: Priority;
 };
@@ -88,7 +85,7 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
 
       const reviewed = await reviewStage(caseId, {
         commandId: command.commandId,
-        approve: command.action === ("APPROVE" as ReviewDecision),
+        approve: command.approve,
         overrideCategory: command.overrideCategory,
         overridePriority: command.overridePriority,
       });

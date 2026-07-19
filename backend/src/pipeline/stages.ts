@@ -1,18 +1,14 @@
 /**
- * U5 — Pipeline stages. Each stage computes one transition, persists it via the transactional
- * `appendEventAndProject` primitive (CaseEvent + Case projection in one tx), then publishes the
- * persisted event to the bus (PIPE-1/PIPE-2). Stages return a directive telling the orchestrator
- * whether to continue, pause (human review), or stop (terminal).
- *
- * Authority split: U3 ranks, U4 checks, U5 decides & persists.
+ * Pipeline stages persist each event and its case projection atomically, then
+ * publish the committed event. The LLM ranks; deterministic rules decide.
  */
 import type { Case, CaseEvent, Prisma, Specialist } from "../generated/prisma/index.js";
 import {
   CaseEventType,
   CaseStatus,
-  Department as PrismaDepartment,
+  Department,
   EventSource,
-  Priority as PrismaPriority,
+  Priority,
 } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
@@ -25,7 +21,6 @@ import {
   groundMatch,
   scrub,
 } from "../guardrails/index.js";
-import { Department, Priority } from "../types.js";
 import { bus } from "../events/bus.js";
 import { filterCandidates, mapCategoryToExpertise, veto } from "./rules.js";
 
@@ -54,16 +49,19 @@ function toCandidateProfile(s: Specialist): CandidateProfile {
     id: s.id,
     name: s.name,
     title: s.title,
-    department: s.department as unknown as Department,
+    department: s.department,
     expertise: s.expertise,
     profile: s.profile,
   };
 }
 
 function buildCaseInfo(caseRow: Case): CaseInfo {
+  if (!caseRow.category) {
+    throw new Error("cannot build assignment input without a category");
+  }
   return {
-    category: caseRow.category as unknown as Department,
-    priority: (caseRow.priority as unknown as Priority) ?? Priority.MEDIUM,
+    category: caseRow.category,
+    priority: caseRow.priority ?? Priority.MEDIUM,
     requiredExpertise: caseRow.requiredExpertise,
     summary: caseRow.summary ?? "",
     scrubbedText: caseRow.scrubbedText,
@@ -85,7 +83,7 @@ export async function scrubStage(caseId: string, rawText: string): Promise<Stage
         redactionCount > 0
           ? `Scrubbed input (${redactionCount} redaction(s))`
           : "Scrubbed input (no PHI detected)",
-      data: { redactions, redactionCount } as unknown as Prisma.InputJsonValue,
+      data: { redactions, redactionCount },
       source: EventSource.GUARDRAIL,
       casePatch: { status: CaseStatus.SCRUBBED, scrubbedText },
     },
@@ -94,7 +92,8 @@ export async function scrubStage(caseId: string, rawText: string): Promise<Stage
 }
 
 /**
- * CLASSIFY — LLM classifies scrubbed text; U4 grounds the category and gates on confidence.
+ * CLASSIFY — the LLM classifies scrubbed text; deterministic checks ground the
+ * category and gate on confidence.
  * Grounding failure → throw (orchestrator fails the case). Low confidence → NEEDS_REVIEW (pause).
  */
 export async function classifyStage(llm: LlmClient, caseRow: Case): Promise<StageResult> {
@@ -113,11 +112,11 @@ export async function classifyStage(llm: LlmClient, caseRow: Case): Promise<Stag
     requiredExpertise: result.requiredExpertise,
     summary: result.summary,
     confidence: result.confidence,
-  } as unknown as Prisma.InputJsonValue;
+  } satisfies Prisma.InputJsonObject;
 
   const casePatch = {
-    category: result.category as unknown as PrismaDepartment,
-    priority: result.priority as unknown as PrismaPriority,
+    category: result.category,
+    priority: result.priority,
     requiredExpertise: result.requiredExpertise,
     summary: result.summary,
     confidence: result.confidence,
@@ -133,7 +132,7 @@ export async function classifyStage(llm: LlmClient, caseRow: Case): Promise<Stag
         reasoning: result.reasoning,
         data: classificationData,
         source: EventSource.LLM,
-        llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
+        llmMeta: { ...llmMeta },
         casePatch,
       },
       "CONTINUE",
@@ -148,7 +147,7 @@ export async function classifyStage(llm: LlmClient, caseRow: Case): Promise<Stag
       reasoning: result.reasoning,
       data: classificationData,
       source: EventSource.GUARDRAIL,
-      llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
+      llmMeta: { ...llmMeta },
       casePatch,
     },
     "PAUSE",
@@ -170,13 +169,13 @@ export async function reviewStage(
 ): Promise<StageResult> {
   const casePatch: AppendEventInput["casePatch"] = { status: CaseStatus.CLASSIFIED };
   if (!command.approve && command.overrideCategory) {
-    casePatch.category = command.overrideCategory as unknown as PrismaDepartment;
+    casePatch.category = command.overrideCategory;
     // A human department override replaces classifier-generated expertise from
     // the old department so stale tags cannot influence candidate ranking.
     casePatch.requiredExpertise = mapCategoryToExpertise(command.overrideCategory, []);
   }
   if (!command.approve && command.overridePriority) {
-    casePatch.priority = command.overridePriority as unknown as PrismaPriority;
+    casePatch.priority = command.overridePriority;
   }
 
   const summary = command.approve
@@ -195,7 +194,7 @@ export async function reviewStage(
         ...(casePatch.requiredExpertise
           ? { requiredExpertise: casePatch.requiredExpertise }
           : {}),
-      } as unknown as Prisma.InputJsonValue,
+      },
       casePatch,
       command: {
         commandId: command.commandId,
@@ -261,9 +260,9 @@ async function assignCore(
         type: assignedType,
         summary: `${mode === "REASSIGN" ? "Reassigned" : "Assigned"} to ${chosen.name} (${chosen.title})`,
         reasoning: match.reasoning,
-        data: { specialistId: chosen.id } as unknown as Prisma.InputJsonValue,
+        data: { specialistId: chosen.id },
         source: EventSource.SYSTEM,
-        llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
+        llmMeta: { ...llmMeta },
         casePatch: { status: assignedStatus, assignedSpecialistId: chosen.id },
         command,
       },
@@ -285,7 +284,7 @@ async function assignCore(
       summary: "Case is unassignable",
       reasoning: reason,
       source: EventSource.SYSTEM,
-      llmMeta: llmMeta as unknown as Prisma.InputJsonValue,
+      llmMeta: { ...llmMeta },
       casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
       command,
     },

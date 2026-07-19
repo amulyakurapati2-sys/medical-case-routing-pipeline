@@ -1,8 +1,6 @@
 /**
- * U5 — In-process event bus (Q1=A). Typed wrapper over Node's EventEmitter, keyed by caseId.
- *
- * The database is the source of truth; this bus is best-effort real-time delivery. U6's SSE
- * endpoint replays any events missed during a disconnect by reading from the repository.
+ * Best-effort in-process event delivery keyed by case ID. PostgreSQL remains
+ * the source of truth and the SSE endpoint replays persisted events.
  */
 import { EventEmitter } from "node:events";
 import type { CaseEvent } from "../generated/prisma/index.js";

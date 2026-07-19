@@ -1,7 +1,5 @@
-/**
- * U3 — Classification prompts (promptVersion: classify-v1).
- */
-import { Department, Priority } from "../types.js";
+/** Versioned prompts for structured case classification. */
+import { Department, Priority } from "../generated/prisma/index.js";
 
 export const CLASSIFY_PROMPT_VERSION = "classify-v1";
 

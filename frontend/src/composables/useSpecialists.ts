@@ -1,4 +1,4 @@
-/** Specialist list + PTO toggle (FR-7.3, FR-6.1). PTO going true triggers backend reassignment. */
+/** Specialist list and PTO updates; enabling PTO triggers backend reassignment. */
 import { computed, onMounted, ref } from "vue";
 import { api, ApiError, newCommandId } from "@/api/client";
 import type { SpecialistVM } from "@/api/types";

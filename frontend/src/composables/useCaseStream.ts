@@ -1,5 +1,5 @@
 /**
- * Live single-case timeline (FR-7.5, NFR-3): snapshot-then-subscribe with dedupe-by-sequence and
+ * Live single-case timeline: snapshot-then-subscribe with dedupe-by-sequence and
  * gap-closing refetch on reconnect. Exactly one EventSource is open at a time — for the selected case.
  *
  * Flow when the selection changes:

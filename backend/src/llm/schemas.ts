@@ -1,9 +1,6 @@
-/**
- * U3 — Zod schemas for LLM structured outputs (single source of truth for shape).
- * U4 may re-use these; pipeline must not trust raw model text.
- */
+/** Runtime schemas and types for validated LLM responses. */
 import { z } from "zod";
-import { Department, Priority } from "../types.js";
+import { Department, Priority } from "../generated/prisma/index.js";
 
 export const ClassificationSchema = z.object({
   category: z.nativeEnum(Department),

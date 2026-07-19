@@ -20,6 +20,7 @@ An event-routed workflow for synthetic medical cases. A case moves through an ob
 - PTO-triggered reassignment and retry for unassignable cases
 - One production service that serves the Vue frontend, REST API, and SSE
 - Docker Compose startup with migrations, idempotent seeding, and health checks
+- Per-IP quotas and bounded prompt sizes for the shared public demo
 
 ## Stack
 
@@ -172,6 +173,10 @@ The database is the source of truth. A case stream replays persisted events afte
 ### Production evolution
 
 For this single-instance demonstration, pipeline work runs asynchronously inside the application process. A production-scale version would place stage work on a durable queue and use an outbox or database-backed event transport while retaining the same persisted case/event model.
+
+### Public demo abuse controls
+
+The hosted application is intentionally accessible without user accounts, so all state is shared demo state. To limit anonymous abuse, LLM-backed submissions are capped at five per client IP every ten minutes and case text is limited to 4,000 characters. Review, retry, and PTO commands have separate per-IP quotas, and command IDs must be UUIDs. These in-process limits are appropriate for the single-instance demo; a multi-instance production service should use an authenticated API and a shared limiter such as Redis.
 
 ## API summary
 

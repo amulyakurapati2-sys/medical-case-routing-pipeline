@@ -1,24 +1,29 @@
-/**
- * U6 — zod request-body schemas + a small validation helper.
- * Invalid bodies throw a 400-tagged error the global handler turns into a safe envelope.
- */
+/** Request-body schemas shared by the HTTP routes. */
 import { z } from "zod";
-import { Department, Priority, ReviewDecision } from "../types.js";
+import { Department, Priority } from "../generated/prisma/index.js";
 
 export const CreateCaseBody = z.object({
-  text: z.string().min(1, "text is required"),
+  // Enough room for a useful synthetic case without allowing an anonymous
+  // visitor to send an excessive prompt to the configured LLM provider.
+  text: z
+    .string()
+    .trim()
+    .min(1, "text is required")
+    .max(4_000, "text must be 4000 characters or fewer"),
 });
 export type CreateCaseBody = z.infer<typeof CreateCaseBody>;
 
+const ReviewActionSchema = z.enum(["APPROVE", "OVERRIDE"]);
+
 export const ReviewBody = z
   .object({
-    commandId: z.string().min(1, "commandId is required"),
-    action: z.nativeEnum(ReviewDecision),
+    commandId: z.uuid("commandId must be a UUID"),
+    action: ReviewActionSchema,
     overrideCategory: z.nativeEnum(Department).optional(),
     overridePriority: z.nativeEnum(Priority).optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.action === ReviewDecision.OVERRIDE && !value.overrideCategory) {
+    if (value.action === "OVERRIDE" && !value.overrideCategory) {
       ctx.addIssue({
         code: "custom",
         path: ["overrideCategory"],
@@ -29,12 +34,12 @@ export const ReviewBody = z
 export type ReviewBody = z.infer<typeof ReviewBody>;
 
 export const RetryCaseBody = z.object({
-  commandId: z.string().min(1, "commandId is required"),
+  commandId: z.uuid("commandId must be a UUID"),
 });
 export type RetryCaseBody = z.infer<typeof RetryCaseBody>;
 
 export const PtoBody = z.object({
-  commandId: z.string().min(1, "commandId is required"),
+  commandId: z.uuid("commandId must be a UUID"),
   onPto: z.boolean(),
 });
 export type PtoBody = z.infer<typeof PtoBody>;

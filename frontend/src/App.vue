@@ -39,7 +39,7 @@ async function onRetry(caseId: string): Promise<void> {
 
 <template>
   <div class="flex h-full flex-col" data-testid="app-root">
-    <!-- Persistent synthetic-data banner (FR-8.2) -->
+    <!-- Persistent reminder because the public demo must never receive real patient data. -->
     <div
       class="sticky top-0 z-10 bg-amber-500 px-4 py-1.5 text-center text-xs font-semibold text-amber-950"
       data-testid="synthetic-data-banner"
@@ -82,6 +82,7 @@ async function onRetry(caseId: string): Promise<void> {
           :connected="stream.connected.value"
           :specialists-by-id="specialists.byId.value"
           :review-submitting="review.submitting.value"
+          :action-error="review.error.value"
           @approve="onApprove"
           @override="onOverride"
           @retry="onRetry"
@@ -94,6 +95,7 @@ async function onRetry(caseId: string): Promise<void> {
           :specialists="specialists.specialists.value"
           :pending-id="specialists.pendingId.value"
           :loading="specialists.loading.value"
+          :error="specialists.error.value"
           @toggle-pto="specialists.togglePto"
         />
       </Card>

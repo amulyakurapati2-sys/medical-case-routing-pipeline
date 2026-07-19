@@ -1,9 +1,4 @@
-/**
- * U3 — Provider-agnostic OpenAI-compatible LlmClient.
- *
- * Configured from AppConfig (baseURL / apiKey / model / jsonMode / timeout / retries).
- * Returns only zod-parsed results + llmMeta. Does not scrub, persist, or ground.
- */
+/** Provider-agnostic OpenAI-compatible client returning validated results. */
 import OpenAI from "openai";
 import type { AppConfig } from "../config/env.js";
 import {
@@ -50,7 +45,7 @@ export function createLlmClient(config: AppConfig): LlmClient {
     apiKey: config.LLM_API_KEY,
     baseURL: config.LLM_BASE_URL,
     timeout: config.LLM_TIMEOUT_MS,
-    maxRetries: 0, // we own the retry loop (RET-2)
+    maxRetries: 0, // The bounded retry loop below owns retry behavior.
   });
 
   const provider = providerLabel(config.LLM_BASE_URL);
@@ -140,7 +135,7 @@ export function createLlmClient(config: AppConfig): LlmClient {
       caseInfo: CaseInfo,
       candidates: CandidateProfile[],
     ): Promise<LlmCallResult<MatchResult>> {
-      // MATCH-1: empty list → no HTTP
+      // Avoid a provider call when deterministic rules found no candidates.
       if (candidates.length === 0) {
         return {
           result: {

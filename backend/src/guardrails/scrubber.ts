@@ -1,8 +1,6 @@
 /**
- * U4 — PHI scrubber (SCR-*). Runs BEFORE any LLM call so the model never sees raw PHI.
- *
- * Heuristic and conservative: favors recall on obvious PHI for a synthetic-data demo.
- * This is NOT a compliance-grade de-identifier. Pure and deterministic (GRD-2).
+ * Heuristic scrubber that runs before every LLM call. It favors recall for a
+ * synthetic demo and is not a compliance-grade de-identifier.
  */
 
 export type RedactionType =
