@@ -1,6 +1,5 @@
 /** Specialist listing and availability updates. */
 import type { FastifyPluginAsync } from "fastify";
-import { commandRepository } from "../db/repositories/commandRepository.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
 import type { Orchestrator } from "../pipeline/index.js";
 import { PtoBody, parseBody } from "./schemas.js";
@@ -39,25 +38,17 @@ export const specialistsRoutes: FastifyPluginAsync<SpecialistsDeps> = async (
         });
       }
 
-      // Idempotency: a replayed command returns current state without re-triggering.
-      const alreadyProcessed = await commandRepository.findByCommandId(body.commandId);
-      if (alreadyProcessed) {
-        return specialistRepository.findById(id);
-      }
-
-      const updated = await specialistRepository.updateAvailability(id, body.onPto);
-      await commandRepository.record({
+      const result = await specialistRepository.updateAvailabilityWithCommand({
         commandId: body.commandId,
-        kind: "PTO",
-        resourceType: "specialist",
-        resourceId: id,
+        specialistId: id,
+        onPto: body.onPto,
       });
 
-      if (body.onPto) {
+      if (result.becameUnavailable) {
         void orchestrator.reassignForSpecialist(id);
       }
 
-      return updated;
+      return result.specialist;
     },
   );
 };
