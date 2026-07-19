@@ -6,6 +6,10 @@ import type { Case, Department, Priority } from "../generated/prisma/index.js";
 import { CaseStatus } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import { commandRepository } from "../db/repositories/commandRepository.js";
+import {
+  assertCommandMatches,
+  IdempotencyConflictError,
+} from "../db/repositories/idempotency.js";
 import type { LlmClient } from "../llm/index.js";
 import { LlmError } from "../llm/index.js";
 import {
@@ -68,9 +72,20 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
     command: ReviewCommand,
   ): Promise<void> {
     try {
+      const commandRecord = {
+        kind: "REVIEW",
+        resourceType: "case",
+        resourceId: caseId,
+        resultSummary: {
+          approve: command.approve,
+          overrideCategory: command.overrideCategory ?? null,
+          overridePriority: command.overridePriority ?? null,
+        },
+      };
       // Idempotency: a replayed review command must not assign twice.
       const alreadyProcessed = await commandRepository.findByCommandId(command.commandId);
       if (alreadyProcessed) {
+        assertCommandMatches(alreadyProcessed, commandRecord);
         return;
       }
 
@@ -90,8 +105,15 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
         overridePriority: command.overridePriority,
       });
 
+      if (reviewed.replayed) {
+        return;
+      }
+
       await assignStage(llm, reviewed.case);
     } catch (err) {
+      if (err instanceof IdempotencyConflictError) {
+        return;
+      }
       await failStage(caseId, safeReason(err));
     }
   }
@@ -109,8 +131,14 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
 
   async function retryUnassignable(caseId: string, commandId: string): Promise<void> {
     try {
+      const commandRecord = {
+        kind: "RETRY_ASSIGNMENT",
+        resourceType: "case",
+        resourceId: caseId,
+      };
       const alreadyProcessed = await commandRepository.findByCommandId(commandId);
       if (alreadyProcessed) {
+        assertCommandMatches(alreadyProcessed, commandRecord);
         return;
       }
 
@@ -121,11 +149,12 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
 
       await assignStage(llm, caseRow, {
         commandId,
-        kind: "RETRY_ASSIGNMENT",
-        resourceType: "case",
-        resourceId: caseId,
+        ...commandRecord,
       });
     } catch (err) {
+      if (err instanceof IdempotencyConflictError) {
+        return;
+      }
       await failStage(caseId, safeReason(err));
     }
   }

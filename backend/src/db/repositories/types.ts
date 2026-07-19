@@ -33,6 +33,11 @@ export type AppendEventInput = {
   llmMeta?: Prisma.InputJsonValue | null;
   causationId?: string | null;
   casePatch: CasePatch;
+  /** Rechecked under a specialist row lock before an assignment is committed. */
+  assignmentGuard?: {
+    specialistId: string;
+    department: Department;
+  };
   /** When set, stored in ProcessedCommand in the same transaction (idempotency). */
   command?: {
     commandId: string;
@@ -46,6 +51,7 @@ export type AppendEventInput = {
 export type AppendEventResult = {
   case: Case;
   event: CaseEvent;
+  replayed: boolean;
 };
 
 export type CreateCaseInput = {

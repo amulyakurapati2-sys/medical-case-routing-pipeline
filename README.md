@@ -170,6 +170,7 @@ All model calls live under `backend/src/llm`. The model classifies scrubbed text
 - Classification values must match fixed application enums.
 - Low confidence enters `NEEDS_REVIEW` instead of being assigned automatically.
 - Candidate filtering enforces department/expertise, PTO, and derived capacity before ranking.
+- Assignment commits lock the selected specialist and atomically recheck PTO, department, and capacity.
 - A model-selected specialist must exist in the supplied candidate list.
 - Deterministic rules perform a final veto before assignment. The LLM advises; code decides.
 

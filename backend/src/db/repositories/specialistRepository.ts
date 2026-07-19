@@ -11,6 +11,10 @@ import type {
 } from "../../generated/prisma/index.js";
 import { CaseStatus, Prisma } from "../../generated/prisma/index.js";
 import { prisma } from "../prisma.js";
+import {
+  assertCommandMatches,
+  IdempotencyConflictError,
+} from "./idempotency.js";
 
 const OPEN_ASSIGNMENT_STATUSES: CaseStatus[] = [
   CaseStatus.ASSIGNED,
@@ -26,14 +30,7 @@ async function getDerivedLoad(id: string): Promise<number> {
   });
 }
 
-export class IdempotencyConflictError extends Error {
-  readonly statusCode = 409;
-
-  constructor() {
-    super("commandId was already used for a different operation");
-    this.name = "IdempotencyConflictError";
-  }
-}
+export { IdempotencyConflictError };
 
 export function assertPtoCommandMatches(
   command: Pick<
@@ -42,22 +39,12 @@ export function assertPtoCommandMatches(
   >,
   expected: { specialistId: string; onPto: boolean },
 ): void {
-  const recordedOnPto = readRecordedOnPto(command.resultSummary);
-  if (
-    command.kind !== "PTO" ||
-    command.resourceType !== "specialist" ||
-    command.resourceId !== expected.specialistId ||
-    (recordedOnPto !== undefined && recordedOnPto !== expected.onPto)
-  ) {
-    throw new IdempotencyConflictError();
-  }
-}
-
-function readRecordedOnPto(value: Prisma.JsonValue | null): boolean | undefined {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return typeof value.onPto === "boolean" ? value.onPto : undefined;
+  assertCommandMatches(command, {
+    kind: "PTO",
+    resourceType: "specialist",
+    resourceId: expected.specialistId,
+    resultSummary: { onPto: expected.onPto },
+  });
 }
 
 type AvailabilityCommandResult = {

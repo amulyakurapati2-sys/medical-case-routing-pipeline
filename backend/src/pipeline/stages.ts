@@ -11,6 +11,7 @@ import {
   Priority,
 } from "../generated/prisma/index.js";
 import { caseRepository } from "../db/repositories/caseRepository.js";
+import { AssignmentEligibilityError } from "../db/repositories/assignmentEligibility.js";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
 import type { AppendEventInput } from "../db/repositories/types.js";
 import type { LlmClient } from "../llm/index.js";
@@ -30,6 +31,7 @@ export type StageResult = {
   case: Case;
   event: CaseEvent;
   next: StageDirective;
+  replayed: boolean;
 };
 
 type AssignmentCommand = NonNullable<AppendEventInput["command"]>;
@@ -39,9 +41,12 @@ async function appendAndEmit(
   input: AppendEventInput,
   next: StageDirective,
 ): Promise<StageResult> {
-  const { case: updated, event } = await caseRepository.appendEventAndProject(input);
-  bus.publish(input.caseId, event);
-  return { case: updated, event, next };
+  const { case: updated, event, replayed } =
+    await caseRepository.appendEventAndProject(input);
+  if (!replayed) {
+    bus.publish(input.caseId, event);
+  }
+  return { case: updated, event, next: replayed ? "TERMINAL" : next, replayed };
 }
 
 function toCandidateProfile(s: Specialist): CandidateProfile {
@@ -201,6 +206,11 @@ export async function reviewStage(
         kind: "REVIEW",
         resourceType: "case",
         resourceId: caseId,
+        resultSummary: {
+          approve: command.approve,
+          overrideCategory: command.overrideCategory ?? null,
+          overridePriority: command.overridePriority ?? null,
+        },
       },
     },
     "CONTINUE",
@@ -254,20 +264,44 @@ async function assignCore(
   const vetoResult = chosen ? veto(caseInfo, chosen, candidates) : { pass: false };
 
   if (match.decision === "ASSIGN" && grounding.grounded && chosen && vetoResult.pass) {
-    return appendAndEmit(
-      {
-        caseId: caseRow.id,
-        type: assignedType,
-        summary: `${mode === "REASSIGN" ? "Reassigned" : "Assigned"} to ${chosen.name} (${chosen.title})`,
-        reasoning: match.reasoning,
-        data: { specialistId: chosen.id },
-        source: EventSource.SYSTEM,
-        llmMeta: { ...llmMeta },
-        casePatch: { status: assignedStatus, assignedSpecialistId: chosen.id },
-        command,
-      },
-      "TERMINAL",
-    );
+    try {
+      return await appendAndEmit(
+        {
+          caseId: caseRow.id,
+          type: assignedType,
+          summary: `${mode === "REASSIGN" ? "Reassigned" : "Assigned"} to ${chosen.name} (${chosen.title})`,
+          reasoning: match.reasoning,
+          data: { specialistId: chosen.id },
+          source: EventSource.SYSTEM,
+          llmMeta: { ...llmMeta },
+          casePatch: { status: assignedStatus, assignedSpecialistId: chosen.id },
+          assignmentGuard: {
+            specialistId: chosen.id,
+            department: caseRow.category,
+          },
+          command,
+        },
+        "TERMINAL",
+      );
+    } catch (error) {
+      if (!(error instanceof AssignmentEligibilityError)) {
+        throw error;
+      }
+
+      return appendAndEmit(
+        {
+          caseId: caseRow.id,
+          type: CaseEventType.UNASSIGNABLE,
+          summary: "Selected specialist became unavailable",
+          reasoning: error.reason,
+          source: EventSource.GUARDRAIL,
+          llmMeta: { ...llmMeta },
+          casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
+          command,
+        },
+        "TERMINAL",
+      );
+    }
   }
 
   const reason =

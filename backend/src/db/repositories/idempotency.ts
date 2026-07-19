@@ -1,0 +1,40 @@
+import { isDeepStrictEqual } from "node:util";
+import type {
+  Prisma,
+  ProcessedCommand,
+} from "../../generated/prisma/index.js";
+
+export class IdempotencyConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor() {
+    super("commandId was already used for a different operation");
+    this.name = "IdempotencyConflictError";
+  }
+}
+
+export function assertCommandMatches(
+  command: Pick<
+    ProcessedCommand,
+    "kind" | "resourceType" | "resourceId" | "resultSummary"
+  >,
+  expected: {
+    kind: string;
+    resourceType: string;
+    resourceId: string;
+    resultSummary?: Prisma.InputJsonValue;
+  },
+): void {
+  const differentIdentity =
+    command.kind !== expected.kind ||
+    command.resourceType !== expected.resourceType ||
+    command.resourceId !== expected.resourceId;
+  const differentPayload =
+    command.resultSummary !== null &&
+    expected.resultSummary !== undefined &&
+    !isDeepStrictEqual(command.resultSummary, expected.resultSummary);
+
+  if (differentIdentity || differentPayload) {
+    throw new IdempotencyConflictError();
+  }
+}
