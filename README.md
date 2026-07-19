@@ -6,7 +6,7 @@ An event-routed workflow for synthetic medical cases. A case moves through an ob
 
 ## Live demo
 
-[Open the deployed application](https://medical-case-routing.onrender.com)
+[Open the deployed application](https://medical-case-routing-tfrw.onrender.com)
 
 > The Render free tier may take up to a minute to wake after inactivity. Use synthetic data only.
 
