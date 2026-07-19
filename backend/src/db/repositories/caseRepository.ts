@@ -8,11 +8,34 @@ import {
   EventSource,
 } from "../../generated/prisma/index.js";
 import { prisma } from "../prisma.js";
+import {
+  assignmentRejectionReason,
+  AssignmentEligibilityError,
+} from "./assignmentEligibility.js";
+import { assertCommandMatches } from "./idempotency.js";
 import type {
   AppendEventInput,
   AppendEventResult,
   CreateCaseInput,
 } from "./types.js";
+
+export class CaseNotFoundError extends Error {
+  readonly statusCode = 404;
+
+  constructor(caseId: string) {
+    super(`Case ${caseId} not found`);
+    this.name = "CaseNotFoundError";
+  }
+}
+
+export class CaseStateConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor(caseId: string, expected: CaseStatus) {
+    super(`Case ${caseId} is not in ${expected}`);
+    this.name = "CaseStateConflictError";
+  }
+}
 
 export const caseRepository = {
   /**
@@ -40,7 +63,7 @@ export const caseRepository = {
         },
       });
 
-      return { case: created, event };
+      return { case: created, event, replayed: false };
     });
   },
 
@@ -88,11 +111,21 @@ export const caseRepository = {
     input: AppendEventInput,
   ): Promise<AppendEventResult> {
     return prisma.$transaction(async (tx) => {
+      // Serialize all transitions for this case. Without the row lock, two
+      // transactions can both calculate the same MAX(sequence) + 1.
+      const locked = await tx.$queryRaw<Array<{ id: string; status: CaseStatus }>>`
+        SELECT "id", "status" FROM "cases" WHERE "id" = ${input.caseId} FOR UPDATE
+      `;
+      if (locked.length === 0) {
+        throw new CaseNotFoundError(input.caseId);
+      }
+
       if (input.command) {
         const existing = await tx.processedCommand.findUnique({
           where: { commandId: input.command.commandId },
         });
         if (existing) {
+          assertCommandMatches(existing, input.command);
           const current = await tx.case.findUniqueOrThrow({
             where: { id: input.caseId },
           });
@@ -105,7 +138,56 @@ export const caseRepository = {
               `Idempotent command ${input.command.commandId} found but case has no events`,
             );
           }
-          return { case: current, event: lastEvent };
+          return { case: current, event: lastEvent, replayed: true };
+        }
+
+        // Reserve the command before taking any specialist lock. PTO updates
+        // use the same command-then-specialist order, preventing lock cycles.
+        await tx.processedCommand.create({
+          data: {
+            commandId: input.command.commandId,
+            kind: input.command.kind,
+            resourceType: input.command.resourceType,
+            resourceId: input.command.resourceId,
+            resultSummary: input.command.resultSummary ?? undefined,
+          },
+        });
+      }
+
+      if (
+        input.expectedCaseStatus !== undefined &&
+        locked[0]?.status !== input.expectedCaseStatus
+      ) {
+        throw new CaseStateConflictError(input.caseId, input.expectedCaseStatus);
+      }
+
+      if (input.assignmentGuard) {
+        const specialistLock = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "specialists"
+          WHERE "id" = ${input.assignmentGuard.specialistId}
+          FOR UPDATE
+        `;
+        if (specialistLock.length === 0) {
+          throw new AssignmentEligibilityError("Selected specialist no longer exists");
+        }
+
+        const specialist = await tx.specialist.findUniqueOrThrow({
+          where: { id: input.assignmentGuard.specialistId },
+        });
+        const currentLoad = await tx.case.count({
+          where: {
+            id: { not: input.caseId },
+            assignedSpecialistId: specialist.id,
+            status: { in: [CaseStatus.ASSIGNED, CaseStatus.REASSIGNED] },
+          },
+        });
+        const rejection = assignmentRejectionReason(
+          specialist,
+          input.assignmentGuard.department,
+          currentLoad,
+        );
+        if (rejection) {
+          throw new AssignmentEligibilityError(rejection);
         }
       }
 
@@ -136,19 +218,7 @@ export const caseRepository = {
         } as Prisma.CaseUpdateInput,
       });
 
-      if (input.command) {
-        await tx.processedCommand.create({
-          data: {
-            commandId: input.command.commandId,
-            kind: input.command.kind,
-            resourceType: input.command.resourceType,
-            resourceId: input.command.resourceId,
-            resultSummary: input.command.resultSummary ?? undefined,
-          },
-        });
-      }
-
-      return { case: caseRow, event };
+      return { case: caseRow, event, replayed: false };
     });
   },
 };

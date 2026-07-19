@@ -13,8 +13,10 @@ const props = defineProps<{
   detail: CaseDetail | null;
   events: CaseEventVM[];
   connected: boolean;
+  loadError: string | null;
   specialistsById: Map<string, SpecialistVM>;
   reviewSubmitting: boolean;
+  actionError: string | null;
 }>();
 const emit = defineEmits<{
   approve: [caseId: string];
@@ -36,7 +38,10 @@ const assignedName = computed(() => {
       class="flex flex-1 items-center justify-center text-sm text-slate-400"
       data-testid="case-timeline-empty"
     >
-      Select or submit a case to watch its pipeline in real time.
+      <p v-if="loadError" class="text-red-700" role="alert">
+        {{ loadError }}
+      </p>
+      <p v-else>Select or submit a case to watch its pipeline in real time.</p>
     </div>
 
     <template v-else>
@@ -67,6 +72,23 @@ const assignedName = computed(() => {
         @approve="(id) => emit('approve', id)"
         @override="(id, cat, pri) => emit('override', id, cat, pri)"
       />
+
+      <p
+        v-if="loadError"
+        class="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+        role="alert"
+      >
+        {{ loadError }}
+      </p>
+
+      <p
+        v-if="actionError"
+        class="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+        role="alert"
+        data-testid="case-action-error"
+      >
+        {{ actionError }}
+      </p>
 
       <div
         v-if="detail.status === 'UNASSIGNABLE'"

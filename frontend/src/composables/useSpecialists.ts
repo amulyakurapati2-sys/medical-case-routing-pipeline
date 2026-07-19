@@ -1,7 +1,9 @@
-/** Specialist list + PTO toggle (FR-7.3, FR-6.1). PTO going true triggers backend reassignment. */
-import { computed, onMounted, ref } from "vue";
+/** Specialist list and PTO updates; enabling PTO triggers backend reassignment. */
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api, ApiError, newCommandId } from "@/api/client";
 import type { SpecialistVM } from "@/api/types";
+
+const REFRESH_INTERVAL_MS = 5000;
 
 export function useSpecialists() {
   const specialists = ref<SpecialistVM[]>([]);
@@ -18,6 +20,7 @@ export function useSpecialists() {
   async function refresh(): Promise<void> {
     try {
       specialists.value = await api.listSpecialists();
+      error.value = null;
     } catch (err) {
       error.value =
         err instanceof ApiError ? err.message : "Failed to load specialists";
@@ -38,10 +41,17 @@ export function useSpecialists() {
     }
   }
 
+  let timer: ReturnType<typeof setInterval> | undefined;
   onMounted(async () => {
     loading.value = true;
     await refresh();
     loading.value = false;
+    // Reassignment can affect cases other than the one currently selected.
+    // Periodic reconciliation keeps every derived load eventually consistent.
+    timer = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+  });
+  onUnmounted(() => {
+    if (timer) clearInterval(timer);
   });
 
   return { specialists, byId, loading, error, pendingId, refresh, togglePto };

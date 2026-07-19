@@ -1,5 +1,5 @@
 /**
- * Frontend view models mirroring the backend DTOs (see backend/src/types.ts + Prisma models).
+ * Frontend view models mirroring the backend's Prisma-backed API payloads.
  * Kept as string-literal unions to stay dependency-free; values match the backend exactly.
  */
 

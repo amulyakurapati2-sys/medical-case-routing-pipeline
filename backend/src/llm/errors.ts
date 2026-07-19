@@ -1,6 +1,4 @@
-/**
- * U3 — Typed LLM failure after retries exhausted (RET-3). No secrets in message.
- */
+/** Safe, typed LLM failure surfaced after retries are exhausted. */
 import type { LlmMeta } from "./schemas.js";
 
 export class LlmError extends Error {

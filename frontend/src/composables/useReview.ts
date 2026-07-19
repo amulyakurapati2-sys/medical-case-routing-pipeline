@@ -1,4 +1,4 @@
-/** Tier 2 human review (FR-5.1): idempotent APPROVE / OVERRIDE. Resume events arrive via SSE. */
+/** Idempotent human review actions; resumed pipeline events arrive over SSE. */
 import { ref } from "vue";
 import { api, ApiError, newCommandId } from "@/api/client";
 import type { Department, Priority } from "@/api/types";

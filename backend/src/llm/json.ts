@@ -1,6 +1,4 @@
-/**
- * U3 — Defensive JSON extraction from model content (JSON-3).
- */
+/** Defensively extract one JSON object from model content. */
 export function extractJsonObject(content: string): unknown {
   const trimmed = content.trim();
   if (!trimmed) {

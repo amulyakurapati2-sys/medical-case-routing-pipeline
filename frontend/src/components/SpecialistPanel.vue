@@ -10,6 +10,7 @@ defineProps<{
   specialists: SpecialistVM[];
   pendingId: string | null;
   loading: boolean;
+  error: string | null;
 }>();
 const emit = defineEmits<{ "toggle-pto": [id: string, onPto: boolean] }>();
 </script>
@@ -19,6 +20,14 @@ const emit = defineEmits<{ "toggle-pto": [id: string, onPto: boolean] }>();
     <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
       Specialists
     </h2>
+    <p
+      v-if="error"
+      class="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+      role="alert"
+      data-testid="specialist-error"
+    >
+      {{ error }}
+    </p>
     <ScrollArea class="min-h-0 flex-1 pr-1">
       <div class="flex flex-col gap-2">
         <Card

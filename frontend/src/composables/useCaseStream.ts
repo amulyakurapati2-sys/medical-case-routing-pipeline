@@ -1,5 +1,5 @@
 /**
- * Live single-case timeline (FR-7.5, NFR-3): snapshot-then-subscribe with dedupe-by-sequence and
+ * Live single-case timeline: snapshot-then-subscribe with dedupe-by-sequence and
  * gap-closing refetch on reconnect. Exactly one EventSource is open at a time — for the selected case.
  *
  * Flow when the selection changes:
@@ -10,7 +10,7 @@
  *      snapshot once to guarantee no gap, then keep merging.
  */
 import { computed, onUnmounted, ref, watch, type Ref } from "vue";
-import { api } from "@/api/client";
+import { api, ApiError } from "@/api/client";
 import type { CaseDetail, CaseEventVM } from "@/api/types";
 import { CASE_EVENT_TYPES } from "@/api/types";
 
@@ -18,6 +18,7 @@ export function useCaseStream(selectedId: Ref<string | null>) {
   const eventsMap = ref<Map<number, CaseEventVM>>(new Map());
   const detail = ref<CaseDetail | null>(null);
   const connected = ref(false);
+  const error = ref<string | null>(null);
 
   let source: EventSource | null = null;
   let refetchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -50,13 +51,22 @@ export function useCaseStream(selectedId: Ref<string | null>) {
     }
   }
 
-  async function loadSnapshot(id: string): Promise<void> {
-    const snapshot = await api.getCase(id);
-    if (currentId !== id) return; // selection changed while awaiting
-    detail.value = snapshot;
-    const next = new Map<number, CaseEventVM>();
-    for (const e of snapshot.events) next.set(e.sequence, e);
-    eventsMap.value = next;
+  async function loadSnapshot(id: string): Promise<boolean> {
+    try {
+      const snapshot = await api.getCase(id);
+      if (currentId !== id) return false; // selection changed while awaiting
+      detail.value = snapshot;
+      const next = new Map<number, CaseEventVM>();
+      for (const e of snapshot.events) next.set(e.sequence, e);
+      eventsMap.value = next;
+      error.value = null;
+      return true;
+    } catch (err) {
+      if (currentId === id) {
+        error.value = err instanceof ApiError ? err.message : "Failed to load case";
+      }
+      return false;
+    }
   }
 
   function openStream(id: string): void {
@@ -90,6 +100,7 @@ export function useCaseStream(selectedId: Ref<string | null>) {
     connected.value = false;
     eventsMap.value = new Map();
     detail.value = null;
+    error.value = null;
   }
 
   watch(
@@ -98,8 +109,9 @@ export function useCaseStream(selectedId: Ref<string | null>) {
       teardown();
       currentId = id;
       if (!id) return;
-      await loadSnapshot(id);
+      const loaded = await loadSnapshot(id);
       if (currentId !== id) return;
+      if (!loaded) return;
       openStream(id);
     },
     { immediate: true },
@@ -107,5 +119,5 @@ export function useCaseStream(selectedId: Ref<string | null>) {
 
   onUnmounted(teardown);
 
-  return { events, detail, connected };
+  return { events, detail, connected, error };
 }

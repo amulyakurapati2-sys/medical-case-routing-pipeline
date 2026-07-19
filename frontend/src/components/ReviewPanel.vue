@@ -58,8 +58,9 @@ function submitOverride(): void {
 
     <div v-if="mode === 'override'" class="mt-3 flex flex-col gap-2">
       <div class="flex flex-col gap-1">
-        <Label>Override category (required)</Label>
+        <Label for="review-override-category">Override category (required)</Label>
         <Select
+          id="review-override-category"
           v-model="overrideCategory"
           :options="DEPARTMENTS"
           placeholder="Select department"
@@ -67,8 +68,9 @@ function submitOverride(): void {
         />
       </div>
       <div class="flex flex-col gap-1">
-        <Label>Override priority (optional)</Label>
+        <Label for="review-override-priority">Override priority (optional)</Label>
         <Select
+          id="review-override-priority"
           v-model="overridePriority"
           :options="PRIORITIES"
           placeholder="Keep current"

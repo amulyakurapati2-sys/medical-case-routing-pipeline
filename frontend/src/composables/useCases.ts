@@ -22,6 +22,7 @@ export function useCases() {
   async function refresh(): Promise<void> {
     try {
       cases.value = await api.listCases();
+      error.value = null;
     } catch (err) {
       error.value = err instanceof ApiError ? err.message : "Failed to load cases";
     }

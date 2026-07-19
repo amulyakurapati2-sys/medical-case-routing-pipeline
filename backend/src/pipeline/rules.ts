@@ -1,9 +1,5 @@
-/**
- * U5 — Deterministic routing rules ("code decides" authority). Pure functions only (DEP-2):
- * they never call the LLM, DB, or network. The LLM only ever ranks among candidates that these
- * rules have already deemed eligible, and `veto` re-checks the LLM's final choice.
- */
-import { Department } from "../types.js";
+/** Pure eligibility and final-veto rules; these never call the LLM or database. */
+import { Department } from "../generated/prisma/index.js";
 import type { CaseInfo } from "../llm/schemas.js";
 
 /** Minimal structural shape shared by Specialist rows and candidate profiles. */

@@ -1,5 +1,5 @@
 /**
- * Thin fetch wrapper around the U6 REST surface. Single source of API URLs.
+ * Thin fetch wrapper and single source of API URLs.
  * Errors are normalized to `ApiError` carrying the backend's safe message + status.
  */
 import type {
