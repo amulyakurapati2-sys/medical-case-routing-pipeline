@@ -2,6 +2,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { caseRepository } from "../db/repositories/caseRepository.js";
 import type { CaseEventBus } from "../events/bus.js";
+import { CaseEventReplayBuffer } from "../events/replayBuffer.js";
 import type { CaseEvent } from "../generated/prisma/index.js";
 
 type StreamDeps = { bus: CaseEventBus };
@@ -29,11 +30,15 @@ export const streamRoutes: FastifyPluginAsync<StreamDeps> = async (app, opts) =>
     reply.hijack();
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     });
 
+    let closed = false;
     const write = (event: CaseEvent): void => {
+      if (closed || reply.raw.destroyed) {
+        return;
+      }
       reply.raw.write(
         `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
       );
@@ -43,26 +48,45 @@ export const streamRoutes: FastifyPluginAsync<StreamDeps> = async (app, opts) =>
     const lastEventIdRaw =
       (req.headers["last-event-id"] as string | undefined) ??
       (req.query as { lastEventId?: string }).lastEventId;
+    const parsedLastEventId = Number(lastEventIdRaw ?? 0);
     const lastEventId =
-      lastEventIdRaw !== undefined ? Number(lastEventIdRaw) : undefined;
+      Number.isSafeInteger(parsedLastEventId) && parsedLastEventId >= 0
+        ? parsedLastEventId
+        : 0;
 
-    if (lastEventId !== undefined && !Number.isNaN(lastEventId)) {
-      const missed = await caseRepository.getEventsAfter(id, lastEventId);
-      missed.forEach(write);
-    } else {
-      const found = await caseRepository.findByIdWithEvents(id);
-      found?.events.forEach(write);
-    }
-
-    const unsubscribe = bus.subscribe(id, write);
+    // Subscribe before querying history. Events committed during the query are
+    // buffered, then merged with its result so the replay-to-live handoff has
+    // no missed-event window.
+    const replay = new CaseEventReplayBuffer(lastEventId, write);
+    const unsubscribe = bus.subscribe(id, (event) => replay.pushLive(event));
     const heartbeat = setInterval(() => {
-      reply.raw.write(": heartbeat\n\n");
+      if (!closed && !reply.raw.destroyed) {
+        reply.raw.write(": heartbeat\n\n");
+      }
     }, HEARTBEAT_MS);
 
-    req.raw.on("close", () => {
+    const cleanup = (): void => {
+      if (closed) {
+        return;
+      }
+      closed = true;
       clearInterval(heartbeat);
       unsubscribe();
-      reply.raw.end();
-    });
+    };
+    req.raw.once("close", cleanup);
+
+    try {
+      const persisted = await caseRepository.getEventsAfter(id, lastEventId);
+      if (!closed) {
+        replay.completeReplay(persisted);
+      }
+    } catch (error) {
+      req.log.error({ err: error, caseId: id }, "SSE replay failed");
+      const canEnd = !reply.raw.destroyed;
+      cleanup();
+      if (canEnd) {
+        reply.raw.end();
+      }
+    }
   });
 };
