@@ -32,6 +32,26 @@ test("review command identity includes the decision payload", () => {
   );
 });
 
+test("invalid-case review decisions have a distinct idempotency payload", () => {
+  assert.deepEqual(
+    reviewCommandRecord("case-1", {
+      approve: false,
+      reject: true,
+    }),
+    {
+      kind: "REVIEW",
+      resourceType: "case",
+      resourceId: "case-1",
+      resultSummary: {
+        approve: false,
+        reject: true,
+        overrideCategory: null,
+        overridePriority: null,
+      },
+    },
+  );
+});
+
 test("retry command identity is scoped to its case", () => {
   assert.deepEqual(retryCommandRecord("case-1"), {
     kind: "RETRY_ASSIGNMENT",

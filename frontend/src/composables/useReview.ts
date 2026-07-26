@@ -40,6 +40,21 @@ export function useReview() {
     }
   }
 
+  async function reject(caseId: string): Promise<void> {
+    submitting.value = true;
+    error.value = null;
+    try {
+      await api.review(caseId, {
+        commandId: newCommandId(),
+        action: "REJECT",
+      });
+    } catch (err) {
+      error.value = err instanceof ApiError ? err.message : "Review failed";
+    } finally {
+      submitting.value = false;
+    }
+  }
+
   async function retryAssignment(caseId: string): Promise<void> {
     submitting.value = true;
     error.value = null;
@@ -52,5 +67,5 @@ export function useReview() {
     }
   }
 
-  return { submitting, error, approve, override, retryAssignment };
+  return { submitting, error, approve, override, reject, retryAssignment };
 }

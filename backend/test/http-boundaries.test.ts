@@ -29,6 +29,25 @@ test("review override requires a category", () => {
   assert.equal(result.success, false);
 });
 
+test("human review can reject an invalid case without a department", () => {
+  const result = ReviewBody.safeParse({
+    commandId: crypto.randomUUID(),
+    action: "REJECT",
+  });
+
+  assert.equal(result.success, true);
+});
+
+test("review rejects override fields for non-override actions", () => {
+  const result = ReviewBody.safeParse({
+    commandId: crypto.randomUUID(),
+    action: "REJECT",
+    overrideCategory: "CARDIOLOGY",
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("state-changing commands require UUID idempotency keys", () => {
   const result = PtoBody.safeParse({
     commandId: "not-a-uuid",

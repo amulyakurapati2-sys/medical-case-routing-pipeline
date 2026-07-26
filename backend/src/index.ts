@@ -82,7 +82,15 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Construct the AI seam once and wire the pipeline into the HTTP surface.
   const llm = createLlmClient(config);
-  const orchestrator = createOrchestrator({ llm });
+  const orchestrator = createOrchestrator({
+    llm,
+    onBackgroundError: (error, context) => {
+      app.log.error(
+        { err: error, ...context },
+        "background pipeline task failed",
+      );
+    },
+  });
 
   await app.register(casesRoutes, { prefix: "/api", orchestrator });
   await app.register(specialistsRoutes, { prefix: "/api", orchestrator });

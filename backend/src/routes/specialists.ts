@@ -1,7 +1,10 @@
 /** Specialist listing and availability updates. */
 import type { FastifyPluginAsync } from "fastify";
 import { specialistRepository } from "../db/repositories/specialistRepository.js";
-import type { Orchestrator } from "../pipeline/index.js";
+import {
+  launchBackgroundTask,
+  type Orchestrator,
+} from "../pipeline/index.js";
 import { PtoBody, parseBody } from "./schemas.js";
 
 type SpecialistsDeps = { orchestrator: Orchestrator };
@@ -45,7 +48,16 @@ export const specialistsRoutes: FastifyPluginAsync<SpecialistsDeps> = async (
       });
 
       if (result.becameUnavailable) {
-        void orchestrator.reassignForSpecialist(id);
+        launchBackgroundTask(
+          orchestrator.reassignForSpecialist(id),
+          { operation: "REASSIGN_FOR_SPECIALIST", specialistId: id },
+          (error, context) => {
+            req.log.error(
+              { err: error, ...context },
+              "background pipeline task failed",
+            );
+          },
+        );
       }
 
       return {

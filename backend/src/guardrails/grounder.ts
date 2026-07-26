@@ -25,16 +25,10 @@ export function groundMatch(
 ): GroundingResult {
   const violations: string[] = [];
 
-  if (match.decision === "ASSIGN") {
-    if (!match.specialistId) {
-      violations.push("decision is ASSIGN but specialistId is missing");
-    } else if (!candidateIds.includes(match.specialistId)) {
-      violations.push(
-        `specialistId '${match.specialistId}' is not among the supplied candidates`,
-      );
-    }
-  } else if (match.decision === "UNASSIGNABLE" && match.specialistId != null) {
-    violations.push("decision is UNASSIGNABLE but specialistId is not null");
+  if (!candidateIds.includes(match.specialistId)) {
+    violations.push(
+      `specialistId '${match.specialistId}' is not among the supplied candidates`,
+    );
   }
 
   return { grounded: violations.length === 0, violations };

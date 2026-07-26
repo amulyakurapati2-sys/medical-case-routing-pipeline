@@ -21,11 +21,17 @@ import {
   retryStage,
   reviewStage,
   scrubStage,
+  type FailureDetails,
 } from "./stages.js";
+import {
+  launchBackgroundTask,
+  type BackgroundTaskFailureHandler,
+} from "./background.js";
 
 export type ReviewCommand = {
   commandId: string;
   approve: boolean;
+  reject?: boolean;
   overrideCategory?: Department;
   overridePriority?: Priority;
 };
@@ -37,12 +43,31 @@ export type Orchestrator = {
   retryUnassignable(caseId: string, commandId: string): Promise<void>;
 };
 
-/** Produce a client-safe failure reason (no secrets, no raw PHI). */
-function safeReason(err: unknown): string {
-  if (err instanceof LlmError) {
-    return err.message;
-  }
-  return "Internal pipeline error";
+type FailureStage =
+  | "PIPELINE"
+  | "MATCH_SPECIALIST"
+  | "RETRY_ASSIGNMENT";
+
+/** Produce client-safe structured diagnostics (no secrets, prompts, or raw PHI). */
+export function safeFailure(
+  err: unknown,
+  fallbackStage: FailureStage,
+): FailureDetails {
+  const isLlmFailure = err instanceof LlmError;
+  const diagnostics = isLlmFailure ? err.diagnostics : undefined;
+  return {
+    reason: isLlmFailure ? err.message : "Internal pipeline error",
+    data: diagnostics
+      ? { ...diagnostics }
+      : {
+          stage: fallbackStage,
+          code: "INTERNAL_ERROR",
+          attempts: 1,
+        },
+    ...(isLlmFailure && err.lastMeta
+      ? { llmMeta: err.lastMeta as Prisma.InputJsonObject }
+      : {}),
+  };
 }
 
 /** Resolve a concurrent global commandId reservation as replay or conflict. */
@@ -65,8 +90,11 @@ async function resolveCommandReservationRace(
   assertCommandMatches(existing, expected);
 }
 
-export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
-  const { llm } = deps;
+export function createOrchestrator(deps: {
+  llm: LlmClient;
+  onBackgroundError: BackgroundTaskFailureHandler;
+}): Orchestrator {
+  const { llm, onBackgroundError } = deps;
 
   async function runPipeline(caseId: string, rawText: string): Promise<void> {
     try {
@@ -85,7 +113,8 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
 
       await assignStage(llm, classified.case);
     } catch (err) {
-      await failStage(caseId, safeReason(err));
+      const failure = safeFailure(err, "PIPELINE");
+      await failStage(caseId, failure);
     }
   }
 
@@ -98,6 +127,7 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
       reviewed = await reviewStage(caseId, {
         commandId: command.commandId,
         approve: command.approve,
+        reject: command.reject,
         overrideCategory: command.overrideCategory,
         overridePriority: command.overridePriority,
       });
@@ -116,17 +146,25 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
     if (reviewed.replayed) {
       return;
     }
+    if (reviewed.next !== "CONTINUE") {
+      return;
+    }
 
     // The review command and state transition have committed. Continue the
     // potentially slow LLM-backed assignment without delaying the 202 response.
-    void assignReviewedCase(reviewed.case);
+    launchBackgroundTask(
+      assignReviewedCase(reviewed.case),
+      { operation: "ASSIGN_REVIEWED_CASE", caseId: reviewed.case.id },
+      onBackgroundError,
+    );
   }
 
   async function assignReviewedCase(caseRow: Case): Promise<void> {
     try {
       await assignStage(llm, caseRow);
     } catch (err) {
-      await failStage(caseRow.id, safeReason(err));
+      const failure = safeFailure(err, "MATCH_SPECIALIST");
+      await failStage(caseRow.id, failure);
     }
   }
 
@@ -136,7 +174,8 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
       try {
         await reassignStageForCase(llm, caseRow);
       } catch (err) {
-        await failStage(caseRow.id, safeReason(err));
+        const failure = safeFailure(err, "MATCH_SPECIALIST");
+        await failStage(caseRow.id, failure);
       }
     }
   }
@@ -160,14 +199,19 @@ export function createOrchestrator(deps: { llm: LlmClient }): Orchestrator {
       return;
     }
 
-    void assignRetriedCase(retried.case);
+    launchBackgroundTask(
+      assignRetriedCase(retried.case),
+      { operation: "ASSIGN_RETRIED_CASE", caseId: retried.case.id },
+      onBackgroundError,
+    );
   }
 
   async function assignRetriedCase(caseRow: Case): Promise<void> {
     try {
       await assignStage(llm, caseRow, CaseStatus.CLASSIFIED);
     } catch (err) {
-      await failStage(caseRow.id, safeReason(err), CaseStatus.CLASSIFIED);
+      const failure = safeFailure(err, "RETRY_ASSIGNMENT");
+      await failStage(caseRow.id, failure, CaseStatus.CLASSIFIED);
     }
   }
 

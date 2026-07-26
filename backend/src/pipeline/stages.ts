@@ -38,6 +38,12 @@ export type StageResult = {
   replayed: boolean;
 };
 
+export type FailureDetails = {
+  reason: string;
+  data: Prisma.InputJsonObject;
+  llmMeta?: Prisma.InputJsonObject;
+};
+
 /** Persist a transition transactionally, then publish the event to the bus. */
 async function appendAndEmit(
   input: AppendEventInput,
@@ -170,10 +176,35 @@ export async function reviewStage(
   command: {
     commandId: string;
     approve: boolean;
+    reject?: boolean;
     overrideCategory?: Department;
     overridePriority?: Priority;
   },
 ): Promise<StageResult> {
+  if (command.reject) {
+    return appendAndEmit(
+      {
+        caseId,
+        type: CaseEventType.UNASSIGNABLE,
+        summary: "Human marked case as invalid — no assignment required",
+        reasoning:
+          "The reviewer determined that the submitted text is not a valid case for specialist routing.",
+        data: { reason: "INVALID_CASE" },
+        source: EventSource.HUMAN,
+        casePatch: {
+          status: CaseStatus.UNASSIGNABLE,
+          assignedSpecialistId: null,
+        },
+        expectedCaseStatus: CaseStatus.NEEDS_REVIEW,
+        command: {
+          commandId: command.commandId,
+          ...reviewCommandRecord(caseId, command),
+        },
+      },
+      "TERMINAL",
+    );
+  }
+
   const casePatch: AppendEventInput["casePatch"] = { status: CaseStatus.CLASSIFIED };
   if (!command.approve && command.overrideCategory) {
     casePatch.category = command.overrideCategory;
@@ -258,47 +289,26 @@ async function assignCore(
   const assignedStatus =
     mode === "REASSIGN" ? CaseStatus.REASSIGNED : CaseStatus.ASSIGNED;
 
-  if (candidates.length === 0) {
-    return appendAndEmit(
-      {
-        caseId: caseRow.id,
-        type: CaseEventType.UNASSIGNABLE,
-        summary: "No eligible specialists available",
-        reasoning: "All matching specialists are on PTO or at capacity",
-        source: EventSource.SYSTEM,
-        casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
-        expectedCaseStatus,
-      },
-      "TERMINAL",
-    );
-  }
-
-  const profiles = candidates.map(toCandidateProfile);
-  const { result: match, llmMeta } = await llm.matchSpecialist(caseInfo, profiles);
-
-  const candidateIds = candidates.map((c) => c.id);
-  const grounding = groundMatch(match, candidateIds);
-  const chosen =
-    match.decision === "ASSIGN" && match.specialistId
-      ? candidates.find((c) => c.id === match.specialistId)
-      : undefined;
-  const vetoResult = chosen ? veto(caseInfo, chosen, candidates) : { pass: false };
-
-  if (match.decision === "ASSIGN" && grounding.grounded && chosen && vetoResult.pass) {
+  async function commitAssignment(
+    chosen: Specialist,
+    reasoning: string,
+    selectionMethod: "SINGLE_ELIGIBLE_CANDIDATE" | "LLM_RANKED",
+    llmMeta?: Prisma.InputJsonObject,
+  ): Promise<StageResult> {
     try {
       return await appendAndEmit(
         {
           caseId: caseRow.id,
           type: assignedType,
           summary: `${mode === "REASSIGN" ? "Reassigned" : "Assigned"} to ${chosen.name} (${chosen.title})`,
-          reasoning: match.reasoning,
-          data: { specialistId: chosen.id },
+          reasoning,
+          data: { specialistId: chosen.id, selectionMethod },
           source: EventSource.SYSTEM,
-          llmMeta: { ...llmMeta },
+          ...(llmMeta ? { llmMeta } : {}),
           casePatch: { status: assignedStatus, assignedSpecialistId: chosen.id },
           assignmentGuard: {
             specialistId: chosen.id,
-            department: caseRow.category,
+            department: caseRow.category!,
           },
           expectedCaseStatus,
         },
@@ -316,7 +326,7 @@ async function assignCore(
           summary: "Selected specialist became unavailable",
           reasoning: error.reason,
           source: EventSource.GUARDRAIL,
-          llmMeta: { ...llmMeta },
+          ...(llmMeta ? { llmMeta } : {}),
           casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
           expectedCaseStatus,
         },
@@ -325,25 +335,57 @@ async function assignCore(
     }
   }
 
-  const reason =
-    match.decision === "UNASSIGNABLE"
-      ? match.reasoning
-      : !grounding.grounded
-        ? `model choice not grounded: ${grounding.violations.join("; ")}`
-        : (vetoResult.reason ?? "no valid specialist selected");
+  if (candidates.length === 0) {
+    return appendAndEmit(
+      {
+        caseId: caseRow.id,
+        type: CaseEventType.UNASSIGNABLE,
+        summary: "No eligible specialists available",
+        reasoning: "All matching specialists are on PTO or at capacity",
+        source: EventSource.SYSTEM,
+        casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
+        expectedCaseStatus,
+      },
+      "TERMINAL",
+    );
+  }
 
-  return appendAndEmit(
-    {
-      caseId: caseRow.id,
-      type: CaseEventType.UNASSIGNABLE,
-      summary: "Case is unassignable",
-      reasoning: reason,
-      source: EventSource.SYSTEM,
-      llmMeta: { ...llmMeta },
-      casePatch: { status: CaseStatus.UNASSIGNABLE, assignedSpecialistId: null },
-      expectedCaseStatus,
-    },
-    "TERMINAL",
+  if (candidates.length === 1) {
+    return commitAssignment(
+      candidates[0]!,
+      "Only one specialist passed the deterministic department, availability, and capacity checks.",
+      "SINGLE_ELIGIBLE_CANDIDATE",
+    );
+  }
+
+  const profiles = candidates.map(toCandidateProfile);
+  const { result: match, llmMeta } = await llm.matchSpecialist(caseInfo, profiles);
+
+  const candidateIds = candidates.map((c) => c.id);
+  const grounding = groundMatch(match, candidateIds);
+  if (!grounding.grounded) {
+    throw new Error(
+      `validated model choice is not grounded: ${grounding.violations.join("; ")}`,
+    );
+  }
+
+  const chosen = candidates.find((candidate) => candidate.id === match.specialistId);
+  if (!chosen) {
+    throw new Error("validated model choice is missing from the candidate list");
+  }
+
+  const vetoResult = veto(caseInfo, chosen, candidates);
+  if (!vetoResult.pass) {
+    throw new Error(
+      `validated model choice failed the final veto: ${vetoResult.reason ?? "unknown reason"}`,
+    );
+  }
+
+  return commitAssignment(
+    chosen,
+    match.reasoning,
+    "LLM_RANKED",
+    { ...llmMeta },
   );
 }
 
@@ -367,7 +409,7 @@ export async function reassignStageForCase(
 /** FAIL — terminal error state; never silent, safe reason only. */
 export async function failStage(
   caseId: string,
-  reason: string,
+  failure: FailureDetails,
   expectedCaseStatus?: CaseStatus,
 ): Promise<StageResult> {
   return appendAndEmit(
@@ -375,9 +417,14 @@ export async function failStage(
       caseId,
       type: CaseEventType.FAILED,
       summary: "Processing failed",
-      reasoning: reason,
+      reasoning: failure.reason,
+      data: failure.data,
       source: EventSource.SYSTEM,
-      casePatch: { status: CaseStatus.FAILED },
+      llmMeta: failure.llmMeta,
+      casePatch: {
+        status: CaseStatus.FAILED,
+        assignedSpecialistId: null,
+      },
       expectedCaseStatus,
     },
     "TERMINAL",

@@ -32,6 +32,11 @@ const confidence = computed(() => {
   const c = props.event.data.confidence;
   return typeof c === "number" ? confidenceTone(c) : null;
 });
+
+const formattedFailureCode = computed(() => {
+  const code = props.event.data.code;
+  return typeof code === "string" ? code.replaceAll("_", " ").toLowerCase() : null;
+});
 </script>
 
 <template>
@@ -88,8 +93,33 @@ const confidence = computed(() => {
         >
           {{ specialistName }}
         </Badge>
+        <Badge
+          v-if="event.data.selectionMethod === 'SINGLE_ELIGIBLE_CANDIDATE'"
+          class="border-slate-200 bg-slate-100 text-slate-700"
+        >
+          deterministic · single candidate
+        </Badge>
+      </template>
+
+      <template v-if="event.type === 'FAILED'">
+        <Badge
+          v-if="formattedFailureCode"
+          class="border-red-200 bg-red-100 text-red-800"
+        >
+          {{ formattedFailureCode }}
+        </Badge>
       </template>
     </div>
+
+    <p
+      v-if="event.type === 'FAILED' && event.data.stage"
+      class="mt-1 text-[11px] text-slate-500"
+    >
+      {{ event.data.stage }}
+      <template v-if="event.data.attempts">
+        · {{ event.data.attempts }} attempt{{ event.data.attempts === 1 ? "" : "s" }}
+      </template>
+    </p>
 
     <p
       v-if="isTerminalError && event.reasoning"

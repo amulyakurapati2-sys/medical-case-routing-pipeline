@@ -175,7 +175,9 @@ PTO follow-up on an assignment → REASSIGNED or UNASSIGNABLE
 
 ### LLM boundary
 
-All model calls live under `backend/src/llm`. The model classifies scrubbed text and ranks candidates already approved by deterministic rules. Responses are parsed and validated with Zod; invalid responses are retried within a configured bound and then recorded as `FAILED` rather than disappearing silently. Lightweight metadata records the provider, model, prompt version, latency, and token usage when available.
+All model calls live under `backend/src/llm`. The model classifies scrubbed text and ranks candidates already approved by deterministic rules when more than one candidate remains. Zero candidates produce `UNASSIGNABLE`; one candidate is assigned directly, because there is no ranking decision for the model to make. Responses are parsed and validated with Zod; invalid responses are retried within a configured bound and then recorded as `FAILED` rather than disappearing silently. Failure events include the stage, a broad failure category, attempts used, and lightweight provider/model metadata. Raw prompts, patient text, credentials, provider error bodies, and model responses are never included in those diagnostics.
+
+The case timeline distinguishes provider availability, invalid model output, configuration problems, and unexpected internal errors. `UNASSIGNABLE` remains a business outcome for PTO/capacity constraints; `FAILED` indicates an operational or validation failure.
 
 ### Guardrails and final authority
 
@@ -184,6 +186,7 @@ All model calls live under `backend/src/llm`. The model classifies scrubbed text
 - Classification values must match fixed application enums.
 - Low confidence enters `NEEDS_REVIEW` instead of being assigned automatically.
 - Candidate filtering enforces department/expertise, PTO, and derived capacity before ranking.
+- A single eligible candidate is assigned deterministically; the LLM ranks only when multiple candidates remain.
 - Assignment commits lock the selected specialist and atomically recheck PTO, department, and capacity.
 - A model-selected specialist must exist in the supplied candidate list.
 - Deterministic rules perform a final veto before assignment. The LLM advises; code decides.
@@ -211,7 +214,7 @@ The hosted application is intentionally accessible without user accounts, so all
 | `POST` | `/api/cases` | Submit a synthetic case |
 | `GET` | `/api/cases` | List cases and current state |
 | `GET` | `/api/cases/:id` | Inspect a case and ordered timeline |
-| `POST` | `/api/cases/:id/review` | Approve or override a low-confidence case |
+| `POST` | `/api/cases/:id/review` | Approve, override, or close a low-confidence case |
 | `POST` | `/api/cases/:id/retry` | Retry an unassignable case |
 | `GET` | `/api/cases/:id/stream` | Recoverable per-case SSE stream |
 | `GET` | `/api/specialists` | List specialists and derived load |
@@ -224,7 +227,7 @@ The hosted application is intentionally accessible without user accounts, so all
 Use synthetic descriptions only.
 
 1. **Clean assignment:** Submit a clear cardiology or nephrology case. Observe scrubbing, classification, candidate filtering, model ranking, and assignment.
-2. **Human review:** Submit a vague case that receives confidence below `CONFIDENCE_THRESHOLD`. Approve the result or override the department/priority, then watch the same pipeline resume.
+2. **Human review:** Submit a vague case that receives confidence below `CONFIDENCE_THRESHOLD`. Review the persisted scrubbed text, then approve the result, override the department/priority, or close invalid text without assignment.
 3. **Unassignable case:** Submit an orthopedic case while the only eligible orthopedist is on PTO. The deterministic filter records `UNASSIGNABLE` without asking the model to invent an assignee.
 4. **PTO follow-up:** Toggle an assigned specialist onto PTO. A reassignment or unassignable event is appended to each affected case timeline.
 5. **Retry:** Restore an eligible specialist and retry an unassignable case without resubmitting the original text.
