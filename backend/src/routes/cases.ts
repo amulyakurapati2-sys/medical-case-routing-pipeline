@@ -7,7 +7,10 @@ import {
   retryCommandRecord,
   reviewCommandRecord,
 } from "../db/repositories/idempotency.js";
-import type { Orchestrator } from "../pipeline/index.js";
+import {
+  launchBackgroundTask,
+  type Orchestrator,
+} from "../pipeline/index.js";
 import {
   CreateCaseBody,
   RetryCaseBody,
@@ -28,7 +31,16 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
     async (req, reply) => {
       const body = parseBody(CreateCaseBody, req.body);
       const { case: created } = await caseRepository.createReceived();
-      void orchestrator.runPipeline(created.id, body.text);
+      launchBackgroundTask(
+        orchestrator.runPipeline(created.id, body.text),
+        { operation: "RUN_PIPELINE", caseId: created.id },
+        (error, context) => {
+          req.log.error(
+            { err: error, ...context },
+            "background pipeline task failed",
+          );
+        },
+      );
       return reply.code(201).send({ id: created.id });
     },
   );
@@ -57,8 +69,13 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
       const command = {
         commandId: body.commandId,
         approve: body.action === "APPROVE",
-        overrideCategory: body.overrideCategory,
-        overridePriority: body.overridePriority,
+        reject: body.action === "REJECT",
+        ...(body.action === "OVERRIDE"
+          ? {
+              overrideCategory: body.overrideCategory,
+              overridePriority: body.overridePriority,
+            }
+          : {}),
       };
       const commandRecord = reviewCommandRecord(id, command);
 
@@ -110,7 +127,7 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
         return reply.code(202).send({ accepted: true });
       }
 
-      const found = await caseRepository.findById(id);
+      const found = await caseRepository.findByIdWithEvents(id);
 
       if (!found) {
         return reply
@@ -121,6 +138,19 @@ export const casesRoutes: FastifyPluginAsync<CasesDeps> = async (app, opts) => {
         return reply.code(409).send({
           error: "Conflict",
           message: `Case ${id} is not unassignable`,
+          status: 409,
+        });
+      }
+      const latestData = found.events.at(-1)?.data;
+      if (
+        latestData &&
+        typeof latestData === "object" &&
+        !Array.isArray(latestData) &&
+        latestData.reason === "INVALID_CASE"
+      ) {
+        return reply.code(409).send({
+          error: "Conflict",
+          message: `Case ${id} was closed by human review and cannot be retried`,
           status: 409,
         });
       }

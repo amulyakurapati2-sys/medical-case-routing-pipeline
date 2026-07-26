@@ -13,24 +13,28 @@ export const CreateCaseBody = z.object({
 });
 export type CreateCaseBody = z.infer<typeof CreateCaseBody>;
 
-const ReviewActionSchema = z.enum(["APPROVE", "OVERRIDE"]);
-
-export const ReviewBody = z
-  .object({
-    commandId: z.uuid("commandId must be a UUID"),
-    action: ReviewActionSchema,
-    overrideCategory: z.nativeEnum(Department).optional(),
-    overridePriority: z.nativeEnum(Priority).optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.action === "OVERRIDE" && !value.overrideCategory) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["overrideCategory"],
-        message: "overrideCategory is required when action is OVERRIDE",
-      });
-    }
-  });
+export const ReviewBody = z.discriminatedUnion("action", [
+  z
+    .object({
+      commandId: z.uuid("commandId must be a UUID"),
+      action: z.literal("APPROVE"),
+    })
+    .strict(),
+  z
+    .object({
+      commandId: z.uuid("commandId must be a UUID"),
+      action: z.literal("OVERRIDE"),
+      overrideCategory: z.nativeEnum(Department),
+      overridePriority: z.nativeEnum(Priority).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      commandId: z.uuid("commandId must be a UUID"),
+      action: z.literal("REJECT"),
+    })
+    .strict(),
+]);
 export type ReviewBody = z.infer<typeof ReviewBody>;
 
 export const RetryCaseBody = z.object({

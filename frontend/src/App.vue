@@ -51,6 +51,11 @@ async function onOverride(
   await cases.refresh();
 }
 
+async function onReject(caseId: string): Promise<void> {
+  await review.reject(caseId);
+  await cases.refresh();
+}
+
 async function onRetry(caseId: string): Promise<void> {
   await review.retryAssignment(caseId);
   await cases.refresh();
@@ -106,6 +111,7 @@ async function onRetry(caseId: string): Promise<void> {
           :action-error="review.error.value"
           @approve="onApprove"
           @override="onOverride"
+          @reject="onReject"
           @retry="onRetry"
         />
       </Card>

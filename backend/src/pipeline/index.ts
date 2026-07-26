@@ -20,4 +20,9 @@ export {
   veto,
   type VetoResult,
 } from "./rules.js";
+export {
+  launchBackgroundTask,
+  type BackgroundTaskContext,
+  type BackgroundTaskFailureHandler,
+} from "./background.js";
 export { bus, CaseEventBus, type CaseEventHandler } from "../events/bus.js";

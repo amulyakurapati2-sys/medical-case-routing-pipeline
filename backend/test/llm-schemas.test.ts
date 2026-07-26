@@ -5,6 +5,7 @@ import {
   ClassificationSchema,
   MatchSchema,
 } from "../src/llm/schemas.js";
+import { parseMatchResponse } from "../src/llm/client.js";
 import { extractJsonObject } from "../src/llm/json.js";
 
 test("classification schema accepts a complete grounded response", () => {
@@ -44,14 +45,29 @@ test("match schema requires a specialist id for assignment", () => {
   assert.equal(result.success, false);
 });
 
-test("match schema requires a null specialist id when unassignable", () => {
+test("match schema rejects unassignable because ranking always receives candidates", () => {
   const result = MatchSchema.safeParse({
     decision: "UNASSIGNABLE",
-    specialistId: "specialist-1",
+    specialistId: null,
     reasoning: "No candidate is available.",
   });
 
   assert.equal(result.success, false);
+});
+
+test("match parsing rejects an id outside the supplied candidates", () => {
+  assert.throws(
+    () =>
+      parseMatchResponse(
+        {
+          decision: "ASSIGN",
+          specialistId: "invented-specialist",
+          reasoning: "Invented choice.",
+        },
+        ["specialist-1", "specialist-2"],
+      ),
+    /outside the supplied candidates/,
+  );
 });
 
 test("JSON extraction handles fenced model responses", () => {

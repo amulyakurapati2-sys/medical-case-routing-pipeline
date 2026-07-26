@@ -1,5 +1,10 @@
 export { createLlmClient, type LlmClient } from "./client.js";
-export { LlmError } from "./errors.js";
+export {
+  LlmError,
+  type LlmFailureCode,
+  type LlmFailureDiagnostics,
+  type LlmFailureStage,
+} from "./errors.js";
 export { extractJsonObject } from "./json.js";
 export {
   ClassificationSchema,

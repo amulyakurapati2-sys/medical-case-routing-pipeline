@@ -13,30 +13,11 @@ export const ClassificationSchema = z.object({
 
 export type Classification = z.infer<typeof ClassificationSchema>;
 
-export const MatchDecisionSchema = z.enum(["ASSIGN", "UNASSIGNABLE"]);
-
-export const MatchSchema = z
-  .object({
-    decision: MatchDecisionSchema,
-    specialistId: z.string().min(1).nullable(),
-    reasoning: z.string().min(1),
-  })
-  .superRefine((val, ctx) => {
-    if (val.decision === "ASSIGN" && !val.specialistId) {
-      ctx.addIssue({
-        code: "custom",
-        message: "specialistId is required when decision is ASSIGN",
-        path: ["specialistId"],
-      });
-    }
-    if (val.decision === "UNASSIGNABLE" && val.specialistId != null) {
-      ctx.addIssue({
-        code: "custom",
-        message: "specialistId must be null when decision is UNASSIGNABLE",
-        path: ["specialistId"],
-      });
-    }
-  });
+export const MatchSchema = z.object({
+  decision: z.literal("ASSIGN"),
+  specialistId: z.string().min(1),
+  reasoning: z.string().min(1),
+});
 
 export type MatchResult = z.infer<typeof MatchSchema>;
 
@@ -69,8 +50,6 @@ export type LlmMeta = {
   latencyMs: number;
   promptVersion: string;
   usage?: LlmUsage;
-  /** True when matchSpecialist short-circuited with empty candidates (no HTTP). */
-  skipped?: boolean;
 };
 
 export type LlmCallResult<T> = {

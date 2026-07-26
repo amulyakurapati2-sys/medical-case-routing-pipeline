@@ -6,7 +6,11 @@ import {
   buildClassifyUserPrompt,
   CLASSIFY_PROMPT_VERSION,
 } from "./classifyCase.js";
-import { LlmError } from "./errors.js";
+import {
+  LlmError,
+  type LlmFailureCode,
+  type LlmFailureStage,
+} from "./errors.js";
 import { extractJsonObject } from "./json.js";
 import {
   buildMatchSystemPrompt,
@@ -32,12 +36,47 @@ export interface LlmClient {
   ): Promise<LlmCallResult<MatchResult>>;
 }
 
+export function parseMatchResponse(
+  raw: unknown,
+  candidateIds: readonly string[],
+): MatchResult {
+  const parsed = MatchSchema.parse(raw);
+  if (!candidateIds.includes(parsed.specialistId)) {
+    throw new Error(
+      `Model selected specialistId '${parsed.specialistId}' outside the supplied candidates`,
+    );
+  }
+  return parsed;
+}
+
 function providerLabel(baseUrl: string): string {
   try {
     return new URL(baseUrl).hostname || "openai-compatible";
   } catch {
     return "openai-compatible";
   }
+}
+
+function numericProperty(error: unknown, property: string): number | undefined {
+  if (typeof error !== "object" || error === null || !(property in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[property];
+  return typeof value === "number" ? value : undefined;
+}
+
+/** Separate transient provider failures from configuration/client errors. */
+export function classifyProviderFailure(error: unknown): {
+  code: LlmFailureCode;
+  retryable: boolean;
+} {
+  const status = numericProperty(error, "status");
+  if (status !== undefined && status >= 400 && status < 500) {
+    if (status !== 408 && status !== 429) {
+      return { code: "CONFIGURATION_ERROR", retryable: false };
+    }
+  }
+  return { code: "PROVIDER_UNAVAILABLE", retryable: true };
 }
 
 export function createLlmClient(config: AppConfig): LlmClient {
@@ -58,12 +97,18 @@ export function createLlmClient(config: AppConfig): LlmClient {
     promptVersion: string;
     parse: (raw: unknown) => T;
     failureLabel: string;
+    stage: LlmFailureStage;
   }): Promise<LlmCallResult<T>> {
     let lastMeta: LlmMeta | undefined;
     let lastError: unknown;
+    let failureCode: LlmFailureCode = "PROVIDER_UNAVAILABLE";
+    let retryable = true;
+    let attempts = 0;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attempts = attempt;
       const started = Date.now();
+      let receivedResponse = false;
       try {
         const completion = await openai.chat.completions.create({
           model,
@@ -76,7 +121,7 @@ export function createLlmClient(config: AppConfig): LlmClient {
             ? { response_format: { type: "json_object" as const } }
             : {}),
         });
-
+        receivedResponse = true;
         const content = completion.choices[0]?.message?.content ?? "";
         const usage = completion.usage
           ? {
@@ -93,24 +138,42 @@ export function createLlmClient(config: AppConfig): LlmClient {
           promptVersion: params.promptVersion,
           usage,
         };
-
         const raw = extractJsonObject(content);
         const result = params.parse(raw);
         return { result, llmMeta: lastMeta };
       } catch (err) {
         lastError = err;
-        lastMeta = {
-          provider,
-          model,
-          latencyMs: Date.now() - started,
-          promptVersion: params.promptVersion,
-        };
+        const failure = receivedResponse
+          ? { code: "INVALID_MODEL_RESPONSE" as const, retryable: true }
+          : classifyProviderFailure(err);
+        failureCode = failure.code;
+        retryable = failure.retryable;
+        if (!receivedResponse) {
+          lastMeta = {
+            provider,
+            model,
+            latencyMs: Date.now() - started,
+            promptVersion: params.promptVersion,
+          };
+        }
+        if (!retryable) {
+          break;
+        }
       }
     }
 
     throw new LlmError(
-      `${params.failureLabel} failed after ${maxAttempts} attempt(s)`,
-      { code: "LLM_RETRIES_EXHAUSTED", cause: lastError, lastMeta },
+      `${params.failureLabel} failed after ${attempts} attempt${attempts === 1 ? "" : "s"}`,
+      {
+        code: failureCode,
+        cause: lastError,
+        lastMeta,
+        diagnostics: {
+          stage: params.stage,
+          code: failureCode,
+          attempts,
+        },
+      },
     );
   }
 
@@ -118,7 +181,12 @@ export function createLlmClient(config: AppConfig): LlmClient {
     async classifyCase(scrubbedText: string): Promise<LlmCallResult<Classification>> {
       if (!scrubbedText.trim()) {
         throw new LlmError("scrubbedText must not be empty", {
-          code: "LLM_INVALID_INPUT",
+          code: "INTERNAL_ERROR",
+          diagnostics: {
+            stage: "CLASSIFICATION",
+            code: "INTERNAL_ERROR",
+            attempts: 0,
+          },
         });
       }
 
@@ -128,6 +196,7 @@ export function createLlmClient(config: AppConfig): LlmClient {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         parse: (raw) => ClassificationSchema.parse(raw),
         failureLabel: "Classification",
+        stage: "CLASSIFICATION",
       });
     },
 
@@ -135,38 +204,28 @@ export function createLlmClient(config: AppConfig): LlmClient {
       caseInfo: CaseInfo,
       candidates: CandidateProfile[],
     ): Promise<LlmCallResult<MatchResult>> {
-      // Avoid a provider call when deterministic rules found no candidates.
-      if (candidates.length === 0) {
-        return {
-          result: {
-            decision: "UNASSIGNABLE",
-            specialistId: null,
-            reasoning: "No eligible candidates supplied",
+      if (candidates.length < 2) {
+        throw new LlmError(
+          "matchSpecialist requires at least two eligible candidates",
+          {
+            code: "INTERNAL_ERROR",
+            diagnostics: {
+              stage: "MATCH_SPECIALIST",
+              code: "INTERNAL_ERROR",
+              attempts: 0,
+            },
           },
-          llmMeta: {
-            provider,
-            model,
-            latencyMs: 0,
-            promptVersion: MATCH_PROMPT_VERSION,
-            skipped: true,
-          },
-        };
+        );
       }
 
+      const candidateIds = candidates.map((candidate) => candidate.id);
       return completeAndParse({
         system: buildMatchSystemPrompt(),
         user: buildMatchUserPrompt(caseInfo, candidates),
         promptVersion: MATCH_PROMPT_VERSION,
-        parse: (raw) => {
-          const parsed = MatchSchema.parse(raw);
-          if (parsed.decision === "UNASSIGNABLE") {
-            throw new Error(
-              "Model returned UNASSIGNABLE despite receiving eligible candidates",
-            );
-          }
-          return parsed;
-        },
+        parse: (raw) => parseMatchResponse(raw, candidateIds),
         failureLabel: "Specialist match",
+        stage: "MATCH_SPECIALIST",
       });
     },
   };

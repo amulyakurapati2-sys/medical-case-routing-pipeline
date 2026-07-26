@@ -21,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   approve: [caseId: string];
   override: [caseId: string, category: Department, priority?: Priority];
+  reject: [caseId: string];
   retry: [caseId: string];
 }>();
 
@@ -28,6 +29,11 @@ const assignedName = computed(() => {
   const id = props.detail?.assignedSpecialistId;
   if (!id) return null;
   return props.specialistsById.get(id)?.name ?? null;
+});
+
+const retryAllowed = computed(() => {
+  const latest = props.events.at(-1);
+  return latest?.type === "UNASSIGNABLE" && latest.data.reason !== "INVALID_CASE";
 });
 </script>
 
@@ -64,6 +70,21 @@ const assignedName = computed(() => {
         </span>
       </div>
 
+      <div
+        class="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2.5"
+        data-testid="case-scrubbed-text"
+      >
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Case text (scrubbed)
+        </p>
+        <p
+          class="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700"
+          :class="{ 'italic text-slate-400': !detail.scrubbedText }"
+        >
+          {{ detail.scrubbedText || "Scrubbing case text…" }}
+        </p>
+      </div>
+
       <ReviewPanel
         v-if="detail.status === 'NEEDS_REVIEW'"
         class="mb-3"
@@ -71,6 +92,7 @@ const assignedName = computed(() => {
         :submitting="reviewSubmitting"
         @approve="(id) => emit('approve', id)"
         @override="(id, cat, pri) => emit('override', id, cat, pri)"
+        @reject="(id) => emit('reject', id)"
       />
 
       <p
@@ -91,7 +113,7 @@ const assignedName = computed(() => {
       </p>
 
       <div
-        v-if="detail.status === 'UNASSIGNABLE'"
+        v-if="detail.status === 'UNASSIGNABLE' && retryAllowed"
         class="mb-3 rounded-md border border-orange-300 bg-orange-50 p-3"
         data-testid="unassignable-retry-panel"
       >
@@ -107,6 +129,19 @@ const assignedName = computed(() => {
         >
           {{ reviewSubmitting ? "Retrying…" : "Retry assignment" }}
         </Button>
+      </div>
+
+      <div
+        v-if="detail.status === 'UNASSIGNABLE' && !retryAllowed"
+        class="mb-3 rounded-md border border-slate-300 bg-slate-50 p-3"
+        data-testid="invalid-case-panel"
+      >
+        <p class="text-sm font-medium text-slate-900">
+          Closed without assignment
+        </p>
+        <p class="mt-0.5 text-xs text-slate-600">
+          A reviewer marked this submission as not valid for specialist routing.
+        </p>
       </div>
 
       <ScrollArea class="min-h-0 flex-1 pr-1">

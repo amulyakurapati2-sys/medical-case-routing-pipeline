@@ -17,6 +17,7 @@ export function reviewCommandRecord(
   caseId: string,
   command: {
     approve: boolean;
+    reject?: boolean;
     overrideCategory?: string;
     overridePriority?: string;
   },
@@ -32,6 +33,7 @@ export function reviewCommandRecord(
     resourceId: caseId,
     resultSummary: {
       approve: command.approve,
+      ...(command.reject ? { reject: true } : {}),
       overrideCategory: command.overrideCategory ?? null,
       overridePriority: command.overridePriority ?? null,
     },

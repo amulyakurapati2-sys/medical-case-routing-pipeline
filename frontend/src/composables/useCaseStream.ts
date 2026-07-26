@@ -34,6 +34,13 @@ export function useCaseStream(selectedId: Ref<string | null>) {
     // trigger reactivity for the computed (Map mutation isn't tracked deeply)
     eventsMap.value = new Map(eventsMap.value);
     projectStatus(event);
+
+    // A newly submitted case may be selected while it is still RECEIVED, so its
+    // initial snapshot has no scrubbed text yet. The SCRUBBED event deliberately
+    // omits case text; refresh the authoritative detail once that stage commits.
+    if (event.type === "SCRUBBED" && !detail.value?.scrubbedText && currentId) {
+      void loadSnapshot(currentId);
+    }
   }
 
   /** Keep the header/status (and review-control visibility) current as events arrive. */
@@ -56,9 +63,12 @@ export function useCaseStream(selectedId: Ref<string | null>) {
       const snapshot = await api.getCase(id);
       if (currentId !== id) return false; // selection changed while awaiting
       detail.value = snapshot;
-      const next = new Map<number, CaseEventVM>();
+      // Preserve events that may have arrived while this request was in flight.
+      const next = new Map(eventsMap.value);
       for (const e of snapshot.events) next.set(e.sequence, e);
       eventsMap.value = next;
+      const latest = [...next.values()].sort((a, b) => a.sequence - b.sequence).at(-1);
+      if (latest) projectStatus(latest);
       error.value = null;
       return true;
     } catch (err) {

@@ -7,13 +7,18 @@ import Card from "./ui/Card.vue";
 import { DEPARTMENTS, PRIORITIES } from "@/api/types";
 import type { Department, Priority } from "@/api/types";
 
-const props = defineProps<{ caseId: string; submitting: boolean }>();
+const props = defineProps<{
+  caseId: string;
+  submitting: boolean;
+}>();
 const emit = defineEmits<{
   approve: [caseId: string];
   override: [caseId: string, category: Department, priority?: Priority];
+  reject: [caseId: string];
 }>();
 
 const mode = ref<"idle" | "override">("idle");
+const confirmingClose = ref(false);
 const overrideCategory = ref<Department | "">("");
 const overridePriority = ref<Priority | "">("");
 
@@ -35,7 +40,7 @@ function submitOverride(): void {
     </p>
     <p class="mt-0.5 text-xs text-amber-700">
       Classification confidence was below threshold. Approve the LLM classification or
-      override the category.
+      choose a different routing decision.
     </p>
 
     <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -50,10 +55,54 @@ function submitOverride(): void {
         variant="outline"
         :disabled="submitting"
         data-testid="review-override-button"
-        @click="mode = mode === 'override' ? 'idle' : 'override'"
+        @click="
+          confirmingClose = false;
+          mode = mode === 'override' ? 'idle' : 'override';
+        "
       >
         Override…
       </Button>
+      <Button
+        variant="destructive"
+        :disabled="submitting"
+        data-testid="review-close-button"
+        @click="
+          mode = 'idle';
+          confirmingClose = true;
+        "
+      >
+        Close invalid case
+      </Button>
+    </div>
+
+    <div
+      v-if="confirmingClose"
+      class="mt-3 rounded-md border border-red-200 bg-red-50 p-2.5"
+      data-testid="review-close-confirmation"
+    >
+      <p class="text-xs text-red-800">
+        Close this case without assigning a specialist? This cannot be retried.
+      </p>
+      <div class="mt-2 flex gap-2">
+        <Button
+          size="sm"
+          variant="destructive"
+          :disabled="submitting"
+          data-testid="review-close-confirm"
+          @click="emit('reject', caseId)"
+        >
+          {{ submitting ? "Closing…" : "Confirm close" }}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="submitting"
+          data-testid="review-close-cancel"
+          @click="confirmingClose = false"
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
 
     <div v-if="mode === 'override'" class="mt-3 flex flex-col gap-2">

@@ -149,4 +149,25 @@ if (!testDatabaseUrl) {
     assert.equal(reviewEventCount, 1);
     assert.equal(commandCount, 1);
   });
+
+  test("rejecting invalid text closes the case without assignment", async () => {
+    const caseRow = await createCaseAwaitingReview();
+    const commandId = randomUUID();
+    commandIds.add(commandId);
+
+    const result = await reviewStage(caseRow.id, {
+      commandId,
+      approve: false,
+      reject: true,
+    });
+
+    assert.equal(result.next, "TERMINAL");
+    assert.equal(result.case.status, CaseStatus.UNASSIGNABLE);
+    assert.equal(result.case.assignedSpecialistId, null);
+    assert.equal(result.event.type, CaseEventType.UNASSIGNABLE);
+    assert.equal(result.event.source, EventSource.HUMAN);
+    assert.deepEqual(result.event.data, {
+      reason: "INVALID_CASE",
+    });
+  });
 }

@@ -25,9 +25,13 @@ export type Department =
 
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
-export type ReviewDecision = "APPROVE" | "OVERRIDE";
-
 export type EventSource = "SYSTEM" | "LLM" | "GUARDRAIL" | "HUMAN";
+
+export type FailureCode =
+  | "PROVIDER_UNAVAILABLE"
+  | "INVALID_MODEL_RESPONSE"
+  | "CONFIGURATION_ERROR"
+  | "INTERNAL_ERROR";
 
 export const CASE_EVENT_TYPES: readonly CaseEventType[] = [
   "RECEIVED",
@@ -66,6 +70,11 @@ export interface EventData {
   summary?: string;
   confidence?: number;
   specialistId?: string;
+  selectionMethod?: "SINGLE_ELIGIBLE_CANDIDATE" | "LLM_RANKED";
+  stage?: string;
+  code?: FailureCode;
+  attempts?: number;
+  reason?: string;
 }
 
 export interface LlmMeta {
@@ -120,12 +129,15 @@ export interface SpecialistVM {
   updatedAt: string;
 }
 
-export interface ReviewRequest {
-  commandId: string;
-  action: ReviewDecision;
-  overrideCategory?: Department;
-  overridePriority?: Priority;
-}
+export type ReviewRequest =
+  | { commandId: string; action: "APPROVE" }
+  | {
+      commandId: string;
+      action: "OVERRIDE";
+      overrideCategory: Department;
+      overridePriority?: Priority;
+    }
+  | { commandId: string; action: "REJECT" };
 
 export interface PtoRequest {
   commandId: string;
